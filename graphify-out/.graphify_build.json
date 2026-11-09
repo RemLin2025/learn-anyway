@@ -1,0 +1,1 @@
+{"excludes": [".build-manual", ".build-manual/**", ".build", ".build/**"], "gitignore": true}

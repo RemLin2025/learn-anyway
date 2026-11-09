@@ -1,0 +1,430 @@
+{
+ "source": "transcription",
+ "scenarios": [
+  {
+   "name": "on_schedule",
+   "steps": [
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:00:00+00:00",
+     "retrievability_before": null,
+     "state": 1,
+     "step": 1,
+     "stability": 2.3065,
+     "difficulty": 2.118103970459016,
+     "due": "2026-01-01T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:10:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 2.3065,
+     "difficulty": 2.111214235785395,
+     "due": "2026-01-03T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-03T00:10:00+00:00",
+     "retrievability_before": 0.9094932559773545,
+     "state": 2,
+     "step": null,
+     "stability": 10.971048263078135,
+     "difficulty": 2.1043313908464483,
+     "due": "2026-01-14T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-14T00:10:00+00:00",
+     "retrievability_before": 0.8998188390602377,
+     "state": 2,
+     "step": null,
+     "stability": 46.316858440073425,
+     "difficulty": 2.0974554287524403,
+     "due": "2026-03-01T00:10:00+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-03-01T00:10:00+00:00",
+     "retrievability_before": 0.9004709139017502,
+     "state": 2,
+     "step": null,
+     "stability": 116.48998898113136,
+     "difficulty": 4.739151024325689,
+     "due": "2026-06-25T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-06-25T00:10:00+00:00",
+     "retrievability_before": 0.9002893245973236,
+     "state": 2,
+     "step": null,
+     "stability": 293.81414617346877,
+     "difficulty": 4.729640242598202,
+     "due": "2027-04-15T00:10:00+00:00"
+    },
+    {
+     "rating": 4,
+     "at": "2027-04-15T00:10:00+00:00",
+     "retrievability_before": 0.8999565504149812,
+     "state": 2,
+     "step": null,
+     "stability": 1015.4097421497352,
+     "difficulty": 2.953759979736054,
+     "due": "2030-01-24T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2030-01-24T00:10:00+00:00",
+     "retrievability_before": 0.9000277258382688,
+     "state": 2,
+     "step": null,
+     "stability": 2404.0870784651247,
+     "difficulty": 2.946034589053156,
+     "due": "2036-08-24T00:10:00+00:00"
+    },
+    {
+     "rating": 1,
+     "at": "2036-08-24T00:10:00+00:00",
+     "retrievability_before": 0.9000024884582839,
+     "state": 3,
+     "step": 0,
+     "stability": 11.038270579439486,
+     "difficulty": 7.666637905683405,
+     "due": "2036-08-24T00:20:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2036-08-24T00:20:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 11.038270579439486,
+     "difficulty": 7.65419963707456,
+     "due": "2036-09-04T00:20:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2036-09-04T00:20:00+00:00",
+     "retrievability_before": 0.9002384293894554,
+     "state": 2,
+     "step": null,
+     "stability": 24.342019327832354,
+     "difficulty": 7.641773806734324,
+     "due": "2036-09-28T00:20:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2036-09-28T00:20:00+00:00",
+     "retrievability_before": 0.900969187621884,
+     "state": 2,
+     "step": null,
+     "stability": 49.957287809036096,
+     "difficulty": 7.629360402224428,
+     "due": "2036-11-17T00:20:00+00:00"
+    }
+   ]
+  },
+  {
+   "name": "all_easy",
+   "steps": [
+    {
+     "rating": 4,
+     "at": "2026-01-01T00:00:00+00:00",
+     "retrievability_before": null,
+     "state": 2,
+     "step": null,
+     "stability": 8.2956,
+     "difficulty": 1.0,
+     "due": "2026-01-09T00:00:00+00:00"
+    },
+    {
+     "rating": 4,
+     "at": "2026-01-09T00:00:00+00:00",
+     "retrievability_before": 0.9024733005284542,
+     "state": 2,
+     "step": null,
+     "stability": 65.62422616189994,
+     "difficulty": 1.0,
+     "due": "2026-03-16T00:00:00+00:00"
+    },
+    {
+     "rating": 4,
+     "at": "2026-03-16T00:00:00+00:00",
+     "retrievability_before": 0.899607248317662,
+     "state": 2,
+     "step": null,
+     "stability": 396.7750233497581,
+     "difficulty": 1.0,
+     "due": "2027-04-17T00:00:00+00:00"
+    },
+    {
+     "rating": 4,
+     "at": "2027-04-17T00:00:00+00:00",
+     "retrievability_before": 0.899961051738456,
+     "state": 2,
+     "step": null,
+     "stability": 1874.9169554074524,
+     "difficulty": 1.0,
+     "due": "2032-06-04T00:00:00+00:00"
+    },
+    {
+     "rating": 4,
+     "at": "2032-06-04T00:00:00+00:00",
+     "retrievability_before": 0.8999969570898693,
+     "state": 2,
+     "step": null,
+     "stability": 7265.432894791257,
+     "difficulty": 1.0,
+     "due": "2052-04-25T00:00:00+00:00"
+    }
+   ]
+  },
+  {
+   "name": "lapses",
+   "steps": [
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:00:00+00:00",
+     "retrievability_before": null,
+     "state": 1,
+     "step": 1,
+     "stability": 2.3065,
+     "difficulty": 2.118103970459016,
+     "due": "2026-01-01T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:10:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 2.3065,
+     "difficulty": 2.111214235785395,
+     "due": "2026-01-03T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-03T00:10:00+00:00",
+     "retrievability_before": 0.9094932559773545,
+     "state": 2,
+     "step": null,
+     "stability": 10.971048263078135,
+     "difficulty": 2.1043313908464483,
+     "due": "2026-01-14T00:10:00+00:00"
+    },
+    {
+     "rating": 1,
+     "at": "2026-01-14T00:10:00+00:00",
+     "retrievability_before": 0.8998188390602377,
+     "state": 3,
+     "step": 0,
+     "stability": 1.53901253028147,
+     "difficulty": 7.389975788014609,
+     "due": "2026-01-14T00:20:00+00:00"
+    },
+    {
+     "rating": 1,
+     "at": "2026-01-14T00:20:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 3,
+     "step": 0,
+     "stability": 0.531128080334255,
+     "difficulty": 9.12733115898188,
+     "due": "2026-01-14T00:30:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-14T00:30:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 0.5817927501903759,
+     "difficulty": 9.113432197119735,
+     "due": "2026-01-15T00:30:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-15T00:30:00+00:00",
+     "retrievability_before": 0.8587281273019458,
+     "state": 2,
+     "step": null,
+     "stability": 1.5114711873404045,
+     "difficulty": 9.099547134219453,
+     "due": "2026-01-17T00:30:00+00:00"
+    },
+    {
+     "rating": 1,
+     "at": "2026-01-17T00:30:00+00:00",
+     "retrievability_before": 0.8796358106898696,
+     "state": 3,
+     "step": 0,
+     "stability": 0.4326982060431191,
+     "difficulty": 9.68925563539426,
+     "due": "2026-01-17T00:40:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-17T00:40:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 0.480409148551078,
+     "difficulty": 9.674794749055703,
+     "due": "2026-01-18T00:40:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-18T00:40:00+00:00",
+     "retrievability_before": 0.8424159790383744,
+     "state": 2,
+     "step": null,
+     "stability": 1.1055419872389556,
+     "difficulty": 9.660348323603484,
+     "due": "2026-01-19T00:40:00+00:00"
+    }
+   ]
+  },
+  {
+   "name": "hard_only",
+   "steps": [
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:00:00+00:00",
+     "retrievability_before": null,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 5.112170705601056,
+     "due": "2026-01-01T00:05:30+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:05:30+00:00",
+     "retrievability_before": 1.0,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 6.7404595108297,
+     "due": "2026-01-01T00:11:00+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:11:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 7.821393497998797,
+     "due": "2026-01-01T00:16:30+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:16:30+00:00",
+     "retrievability_before": 1.0,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 8.538967850205447,
+     "due": "2026-01-01T00:22:00+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:22:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 9.015327144165033,
+     "due": "2026-01-01T00:27:30+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-01T00:27:30+00:00",
+     "retrievability_before": 1.0,
+     "state": 1,
+     "step": 0,
+     "stability": 1.2931,
+     "difficulty": 9.331556641838505,
+     "due": "2026-01-01T00:33:00+00:00"
+    }
+   ]
+  },
+  {
+   "name": "irregular",
+   "steps": [
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:00:00+00:00",
+     "retrievability_before": null,
+     "state": 1,
+     "step": 1,
+     "stability": 2.3065,
+     "difficulty": 2.118103970459016,
+     "due": "2026-01-01T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-01T00:30:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 2.3065,
+     "difficulty": 2.111214235785395,
+     "due": "2026-01-03T00:30:00+00:00"
+    },
+    {
+     "rating": 2,
+     "at": "2026-01-02T06:00:00+00:00",
+     "retrievability_before": 0.9468474993825461,
+     "state": 2,
+     "step": null,
+     "stability": 5.321129419241061,
+     "difficulty": 4.748284761594571,
+     "due": "2026-01-07T06:00:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-01-06T00:00:00+00:00",
+     "retrievability_before": 0.9344022679987967,
+     "state": 2,
+     "step": null,
+     "stability": 14.097736302846357,
+     "difficulty": 4.738764846129815,
+     "due": "2026-01-20T00:00:00+00:00"
+    },
+    {
+     "rating": 1,
+     "at": "2026-02-10T00:00:00+00:00",
+     "retrievability_before": 0.8267649061672347,
+     "state": 3,
+     "step": 0,
+     "stability": 1.8682909934456458,
+     "difficulty": 8.255896150618755,
+     "due": "2026-02-10T00:10:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-02-10T00:06:00+00:00",
+     "retrievability_before": 1.0,
+     "state": 2,
+     "step": null,
+     "stability": 1.8839554315639673,
+     "difficulty": 8.242868623764974,
+     "due": "2026-02-12T00:06:00+00:00"
+    },
+    {
+     "rating": 3,
+     "at": "2026-04-11T00:00:00+00:00",
+     "retrievability_before": 0.5868583456421478,
+     "state": 2,
+     "step": null,
+     "stability": 13.718893072099933,
+     "difficulty": 8.229854124438047,
+     "due": "2026-04-25T00:00:00+00:00"
+    }
+   ]
+  }
+ ]
+}

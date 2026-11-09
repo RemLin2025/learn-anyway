@@ -1,0 +1,23 @@
+.build/
+.swiftpm/
+build/
+*.xcodeproj/xcuserdata/
+DerivedData/
+.DS_Store
+
+# Swift build artifacts
+.build/
+.build-manual/
+.swiftpm/
+DerivedData/
+
+# macOS
+.DS_Store
+
+# Xcode user-specific files
+xcuserdata/
+*.xcuserstate
+
+# Temporary files
+*.log
+*.tmp

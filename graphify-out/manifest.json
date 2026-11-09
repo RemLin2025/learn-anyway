@@ -1,0 +1,656 @@
+{
+  "Package.swift": {
+    "mtime": 1793917558.5085993,
+    "seen": 1794185633.190546,
+    "ast_hash": "a875bd7f213c6be1206325ade9a829ae",
+    "semantic_hash": "a875bd7f213c6be1206325ade9a829ae"
+  },
+  "Sources/CramLabApp/AITaskCenterView.swift": {
+    "mtime": 1793990239.808621,
+    "seen": 1794185633.190549,
+    "ast_hash": "e4d47df71e29c019d2375d5c3ab08e91",
+    "semantic_hash": "e4d47df71e29c019d2375d5c3ab08e91"
+  },
+  "Sources/CramLabApp/AdaptiveViews.swift": {
+    "mtime": 1793921462.6948063,
+    "seen": 1794185633.19055,
+    "ast_hash": "ccee39830cdc12b0a109ae5f1a775528",
+    "semantic_hash": "ccee39830cdc12b0a109ae5f1a775528"
+  },
+  "Sources/CramLabApp/AppModel.swift": {
+    "mtime": 1793935205.3775904,
+    "seen": 1794185633.190551,
+    "ast_hash": "99259392daf4e0c8d9d2d46b7dab9209",
+    "semantic_hash": "99259392daf4e0c8d9d2d46b7dab9209"
+  },
+  "Sources/CramLabApp/CodeEditorView.swift": {
+    "mtime": 1793919283.140493,
+    "seen": 1794185633.190551,
+    "ast_hash": "9f0a37527a26e24c1de8eaec17e14a59",
+    "semantic_hash": "9f0a37527a26e24c1de8eaec17e14a59"
+  },
+  "Sources/CramLabApp/CodeRunViews.swift": {
+    "mtime": 1793933273.6340754,
+    "seen": 1794185633.190552,
+    "ast_hash": "887092b554f6851e51916b27ac22d02c",
+    "semantic_hash": "887092b554f6851e51916b27ac22d02c"
+  },
+  "Sources/CramLabApp/CoursesView.swift": {
+    "mtime": 1793925784.3741615,
+    "seen": 1794185633.190552,
+    "ast_hash": "881b902e03a6661a04199b1afa854c5a",
+    "semantic_hash": "881b902e03a6661a04199b1afa854c5a"
+  },
+  "Sources/CramLabApp/CramLabApp.swift": {
+    "mtime": 1793923813.2081327,
+    "seen": 1794185633.1905532,
+    "ast_hash": "ddec7b517b93c2a7e060c4916f13ccd0",
+    "semantic_hash": "ddec7b517b93c2a7e060c4916f13ccd0"
+  },
+  "Sources/CramLabApp/DesignSystem.swift": {
+    "mtime": 1793923928.247556,
+    "seen": 1794185633.1905532,
+    "ast_hash": "94ec2245c45d50869c2cc69bc69084b5",
+    "semantic_hash": "94ec2245c45d50869c2cc69bc69084b5"
+  },
+  "Sources/CramLabApp/FocusModel.swift": {
+    "mtime": 1793922850.0328994,
+    "seen": 1794185633.1905541,
+    "ast_hash": "4d08f336a7cf912ccaf09fe354f4819d",
+    "semantic_hash": "4d08f336a7cf912ccaf09fe354f4819d"
+  },
+  "Sources/CramLabApp/FocusViews.swift": {
+    "mtime": 1793923928.2904558,
+    "seen": 1794185633.1905541,
+    "ast_hash": "b6728769bf2bef4372b34f826f746f24",
+    "semantic_hash": "b6728769bf2bef4372b34f826f746f24"
+  },
+  "Sources/CramLabApp/GradingViews.swift": {
+    "mtime": 1793933273.6813123,
+    "seen": 1794185633.1905541,
+    "ast_hash": "044b10e8a1e4ed2c0c25037adff08889",
+    "semantic_hash": "044b10e8a1e4ed2c0c25037adff08889"
+  },
+  "Sources/CramLabApp/HomeView.swift": {
+    "mtime": 1793925784.3733294,
+    "seen": 1794185633.1905549,
+    "ast_hash": "9df495fc020f8f4013dd9e01789f57df",
+    "semantic_hash": "9df495fc020f8f4013dd9e01789f57df"
+  },
+  "Sources/CramLabApp/InsightsView.swift": {
+    "mtime": 1793935004.4532368,
+    "seen": 1794185633.1905549,
+    "ast_hash": "09bf5c2ce712ca46ec95e71459fb19db",
+    "semantic_hash": "09bf5c2ce712ca46ec95e71459fb19db"
+  },
+  "Sources/CramLabApp/MathView.swift": {
+    "mtime": 1793919283.138848,
+    "seen": 1794185633.1905558,
+    "ast_hash": "a199e04df7bfb49a0b812288676a0ca2",
+    "semantic_hash": "a199e04df7bfb49a0b812288676a0ca2"
+  },
+  "Sources/CramLabApp/PracticeModel.swift": {
+    "mtime": 1793933246.4385269,
+    "seen": 1794185633.1905558,
+    "ast_hash": "8dec1077ba85dbaab9158147d33623f5",
+    "semantic_hash": "8dec1077ba85dbaab9158147d33623f5"
+  },
+  "Sources/CramLabApp/PracticeView.swift": {
+    "mtime": 1793945933.6037586,
+    "seen": 1794185633.190557,
+    "ast_hash": "affdd2adf50dc6daef6c83bedf0ecd31",
+    "semantic_hash": "affdd2adf50dc6daef6c83bedf0ecd31"
+  },
+  "Sources/CramLabApp/QuestionBankView.swift": {
+    "mtime": 1793945926.4005575,
+    "seen": 1794185633.190557,
+    "ast_hash": "c0a64ae9075b00a3c20d27b36d7c2715",
+    "semantic_hash": "c0a64ae9075b00a3c20d27b36d7c2715"
+  },
+  "Sources/CramLabApp/QuestionPreview.swift": {
+    "mtime": 1793933273.6820555,
+    "seen": 1794185633.190558,
+    "ast_hash": "0e1f8448aec93f2379ab5b3296994c01",
+    "semantic_hash": "0e1f8448aec93f2379ab5b3296994c01"
+  },
+  "Sources/CramLabApp/RootView.swift": {
+    "mtime": 1793922902.5874186,
+    "seen": 1794185633.190558,
+    "ast_hash": "b99d2be7f2df3848782eb757322ecce1",
+    "semantic_hash": "b99d2be7f2df3848782eb757322ecce1"
+  },
+  "Sources/CramLabApp/SettingsView.swift": {
+    "mtime": 1793935211.5647767,
+    "seen": 1794185633.190559,
+    "ast_hash": "dbb840852aeddf913e08efe48aa206d8",
+    "semantic_hash": "dbb840852aeddf913e08efe48aa206d8"
+  },
+  "Sources/CramLabApp/SkillMapView.swift": {
+    "mtime": 1793922986.0231626,
+    "seen": 1794185633.190559,
+    "ast_hash": "8b81396d483a6b976bb2aa8862c9a13b",
+    "semantic_hash": "8b81396d483a6b976bb2aa8862c9a13b"
+  },
+  "Sources/CramLabApp/SkillsView.swift": {
+    "mtime": 1793946061.5737145,
+    "seen": 1794185633.19056,
+    "ast_hash": "a3d1594048dbbc692771fa663c1ee524",
+    "semantic_hash": "a3d1594048dbbc692771fa663c1ee524"
+  },
+  "Sources/CramLabApp/SnapshotRunner.swift": {
+    "mtime": 1793933506.3915012,
+    "seen": 1794185633.19056,
+    "ast_hash": "cc2eba332111bd79537f9dfe7c3145b2",
+    "semantic_hash": "cc2eba332111bd79537f9dfe7c3145b2"
+  },
+  "Sources/CramLabApp/StudyPlanView.swift": {
+    "mtime": 1793923028.106284,
+    "seen": 1794185633.19056,
+    "ast_hash": "d76d061f51d4bde3a113c16a4d7abf77",
+    "semantic_hash": "d76d061f51d4bde3a113c16a4d7abf77"
+  },
+  "Sources/CramLabApp/TopicViews.swift": {
+    "mtime": 1793990205.8835597,
+    "seen": 1794185633.190561,
+    "ast_hash": "25aa88dbef2dea86889d07d254deb11c",
+    "semantic_hash": "25aa88dbef2dea86889d07d254deb11c"
+  },
+  "Sources/CramLabCore/AI/AIImportService.swift": {
+    "mtime": 1793918116.3974268,
+    "seen": 1794185633.190561,
+    "ast_hash": "f62c4b17f20abbaa787d0d0cb4c4daf0",
+    "semantic_hash": "f62c4b17f20abbaa787d0d0cb4c4daf0"
+  },
+  "Sources/CramLabCore/AI/AITaskService.swift": {
+    "mtime": 1793989985.0466206,
+    "seen": 1794185633.190562,
+    "ast_hash": "83a56aaecd237f7d0a95f531bfef4575",
+    "semantic_hash": "83a56aaecd237f7d0a95f531bfef4575"
+  },
+  "Sources/CramLabCore/AI/DirectAI.swift": {
+    "mtime": 1793990039.0643864,
+    "seen": 1794185633.190562,
+    "ast_hash": "de1026c957244cf2dc10fbe9ee8cf126",
+    "semantic_hash": "de1026c957244cf2dc10fbe9ee8cf126"
+  },
+  "Sources/CramLabCore/AI/GradeImport.swift": {
+    "mtime": 1793920173.1901724,
+    "seen": 1794185633.190563,
+    "ast_hash": "af667ea9b904f66b5f950a4619c04f3d",
+    "semantic_hash": "af667ea9b904f66b5f950a4619c04f3d"
+  },
+  "Sources/CramLabCore/AI/GradingPrompt.swift": {
+    "mtime": 1793920179.6982272,
+    "seen": 1794185633.190563,
+    "ast_hash": "f7be4d4314a5e3beddf4b30216e2d2de",
+    "semantic_hash": "f7be4d4314a5e3beddf4b30216e2d2de"
+  },
+  "Sources/CramLabCore/AI/PromptBuilder.swift": {
+    "mtime": 1793990000.08121,
+    "seen": 1794185633.190563,
+    "ast_hash": "47b539361af7b89b6d8732dd74f9ba8c",
+    "semantic_hash": "47b539361af7b89b6d8732dd74f9ba8c"
+  },
+  "Sources/CramLabCore/AI/ResponseSchema.swift": {
+    "mtime": 1793933665.714402,
+    "seen": 1794185633.1905642,
+    "ast_hash": "291dcca4ca120bd67ca84ea7a9b73f01",
+    "semantic_hash": "291dcca4ca120bd67ca84ea7a9b73f01"
+  },
+  "Sources/CramLabCore/AI/TopicAnalysis.swift": {
+    "mtime": 1793990039.0635152,
+    "seen": 1794185633.1905642,
+    "ast_hash": "fedc3c24e9ddb076c677504a8a9cdf88",
+    "semantic_hash": "fedc3c24e9ddb076c677504a8a9cdf88"
+  },
+  "Sources/CramLabCore/Backup/BackupService.swift": {
+    "mtime": 1793922496.7363353,
+    "seen": 1794185633.190565,
+    "ast_hash": "5985a1f4b74829a5ec595a50a9bfeb05",
+    "semantic_hash": "5985a1f4b74829a5ec595a50a9bfeb05"
+  },
+  "Sources/CramLabCore/Code/EditorLogic.swift": {
+    "mtime": 1793919079.3626914,
+    "seen": 1794185633.190565,
+    "ast_hash": "51a380b2a9d7888ae1feaf4f504cfa49",
+    "semantic_hash": "51a380b2a9d7888ae1feaf4f504cfa49"
+  },
+  "Sources/CramLabCore/Code/SyntaxHighlighter.swift": {
+    "mtime": 1793919071.5171568,
+    "seen": 1794185633.1905658,
+    "ast_hash": "ed8a8e9968678f568bb68e0c353876b8",
+    "semantic_hash": "ed8a8e9968678f568bb68e0c353876b8"
+  },
+  "Sources/CramLabCore/Courses/CourseService.swift": {
+    "mtime": 1793917033.262413,
+    "seen": 1794185633.1905658,
+    "ast_hash": "ffa3559677d5751229f89685040c3d77",
+    "semantic_hash": "ffa3559677d5751229f89685040c3d77"
+  },
+  "Sources/CramLabCore/Courses/SkillTree.swift": {
+    "mtime": 1793917498.0479226,
+    "seen": 1794185633.1905658,
+    "ast_hash": "dbfe7ed6d81b0a0a05bea60c4805c85c",
+    "semantic_hash": "dbfe7ed6d81b0a0a05bea60c4805c85c"
+  },
+  "Sources/CramLabCore/Demo/DemoWorkspace.swift": {
+    "mtime": 1793933246.437941,
+    "seen": 1794185633.190567,
+    "ast_hash": "d38914605dcf54417ed1812e8b609a51",
+    "semantic_hash": "d38914605dcf54417ed1812e8b609a51"
+  },
+  "Sources/CramLabCore/Documents/DocumentService.swift": {
+    "mtime": 1793917056.8501427,
+    "seen": 1794185633.190567,
+    "ast_hash": "dd8f2c6a0bf08a00e853f39dd59cd154",
+    "semantic_hash": "dd8f2c6a0bf08a00e853f39dd59cd154"
+  },
+  "Sources/CramLabCore/Domain/Info.swift": {
+    "mtime": 1793917084.595928,
+    "seen": 1794185633.190568,
+    "ast_hash": "f0e0ca7560b2f91f0bcce22affcfc845",
+    "semantic_hash": "f0e0ca7560b2f91f0bcce22affcfc845"
+  },
+  "Sources/CramLabCore/Domain/Models.swift": {
+    "mtime": 1793917009.2149475,
+    "seen": 1794185633.190568,
+    "ast_hash": "6894388f10673535324eafbb3a7a7e5b",
+    "semantic_hash": "6894388f10673535324eafbb3a7a7e5b"
+  },
+  "Sources/CramLabCore/Domain/PracticeModels.swift": {
+    "mtime": 1793921012.0983286,
+    "seen": 1794185633.190569,
+    "ast_hash": "360f785aa855e08985414a7ee7d4565d",
+    "semantic_hash": "360f785aa855e08985414a7ee7d4565d"
+  },
+  "Sources/CramLabCore/Domain/ProgressionModels.swift": {
+    "mtime": 1793921012.103513,
+    "seen": 1794185633.190569,
+    "ast_hash": "a4d0e40749e6c3cde2c819093d86fee4",
+    "semantic_hash": "a4d0e40749e6c3cde2c819093d86fee4"
+  },
+  "Sources/CramLabCore/Domain/QuestionModels.swift": {
+    "mtime": 1793989985.045977,
+    "seen": 1794185633.1905699,
+    "ast_hash": "c08ec53ee10b19e6c8c7dab55fcb2ec7",
+    "semantic_hash": "c08ec53ee10b19e6c8c7dab55fcb2ec7"
+  },
+  "Sources/CramLabCore/Evaluation/EvaluationService.swift": {
+    "mtime": 1793933073.7894347,
+    "seen": 1794185633.1905699,
+    "ast_hash": "1564a7264ace5200aa4f4349b8864901",
+    "semantic_hash": "1564a7264ace5200aa4f4349b8864901"
+  },
+  "Sources/CramLabCore/Evaluation/Evaluator.swift": {
+    "mtime": 1793933660.5685244,
+    "seen": 1794185633.190571,
+    "ast_hash": "c20d7cde7c6600319318eb63ffbfaf3f",
+    "semantic_hash": "c20d7cde7c6600319318eb63ffbfaf3f"
+  },
+  "Sources/CramLabCore/Evaluation/ProgressionEngine.swift": {
+    "mtime": 1793921031.620834,
+    "seen": 1794185633.190571,
+    "ast_hash": "39e313e86517ad9e1085ed793f883f76",
+    "semantic_hash": "39e313e86517ad9e1085ed793f883f76"
+  },
+  "Sources/CramLabCore/Execution/CodeVerification.swift": {
+    "mtime": 1793933113.278082,
+    "seen": 1794185633.190571,
+    "ast_hash": "f5e93a3e06c4f28970c25ffe065917c3",
+    "semantic_hash": "f5e93a3e06c4f28970c25ffe065917c3"
+  },
+  "Sources/CramLabCore/Execution/ProcessSupervisor.swift": {
+    "mtime": 1793932954.161783,
+    "seen": 1794185633.190572,
+    "ast_hash": "36fb119650bca9464682f8c11dbbf1ed",
+    "semantic_hash": "36fb119650bca9464682f8c11dbbf1ed"
+  },
+  "Sources/CramLabCore/Execution/SandboxedCodeRunner.swift": {
+    "mtime": 1793932785.9242103,
+    "seen": 1794185633.190572,
+    "ast_hash": "372057356198aded1685e5b5ca18b1ae",
+    "semantic_hash": "372057356198aded1685e5b5ca18b1ae"
+  },
+  "Sources/CramLabCore/Focus/FocusTimer.swift": {
+    "mtime": 1793922282.414587,
+    "seen": 1794185633.190573,
+    "ast_hash": "76d71a36e9a5ae556f3ef228497e2f2f",
+    "semantic_hash": "76d71a36e9a5ae556f3ef228497e2f2f"
+  },
+  "Sources/CramLabCore/Insights/InsightsService.swift": {
+    "mtime": 1793924848.4820201,
+    "seen": 1794185633.190573,
+    "ast_hash": "82799d0626ad98c1296a6c4f777d46da",
+    "semantic_hash": "82799d0626ad98c1296a6c4f777d46da"
+  },
+  "Sources/CramLabCore/Insights/SkillGraphLayout.swift": {
+    "mtime": 1793922316.4586792,
+    "seen": 1794185633.190573,
+    "ast_hash": "c845d0423c0b016f5382c226f200d444",
+    "semantic_hash": "c845d0423c0b016f5382c226f200d444"
+  },
+  "Sources/CramLabCore/Learning/Calibration.swift": {
+    "mtime": 1793934909.1371808,
+    "seen": 1794185633.1905742,
+    "ast_hash": "def62c3cb2e243eb1c8a30e36cfabd53",
+    "semantic_hash": "def62c3cb2e243eb1c8a30e36cfabd53"
+  },
+  "Sources/CramLabCore/Learning/Coach.swift": {
+    "mtime": 1793945926.40098,
+    "seen": 1794185633.1905742,
+    "ast_hash": "8ce7cab465de30a0daa5d137011e82f9",
+    "semantic_hash": "8ce7cab465de30a0daa5d137011e82f9"
+  },
+  "Sources/CramLabCore/Learning/Diagnostic.swift": {
+    "mtime": 1793921201.607239,
+    "seen": 1794185633.1905751,
+    "ast_hash": "29d8427544934dec3ec8994b76e15d0a",
+    "semantic_hash": "29d8427544934dec3ec8994b76e15d0a"
+  },
+  "Sources/CramLabCore/Learning/FSRS.swift": {
+    "mtime": 1793920915.28568,
+    "seen": 1794185633.1905751,
+    "ast_hash": "bb7f08c2898d0e9f48f8028dbbea70eb",
+    "semantic_hash": "bb7f08c2898d0e9f48f8028dbbea70eb"
+  },
+  "Sources/CramLabCore/Learning/History.swift": {
+    "mtime": 1793925032.3950574,
+    "seen": 1794185633.190576,
+    "ast_hash": "535bedc0ba1dcbeb68261ffc77739381",
+    "semantic_hash": "535bedc0ba1dcbeb68261ffc77739381"
+  },
+  "Sources/CramLabCore/Learning/MasteryEstimator.swift": {
+    "mtime": 1793934909.133698,
+    "seen": 1794185633.190576,
+    "ast_hash": "8bdbc8fb1a0de35d5ce797a25cd43dc0",
+    "semantic_hash": "8bdbc8fb1a0de35d5ce797a25cd43dc0"
+  },
+  "Sources/CramLabCore/Learning/ProgressionService.swift": {
+    "mtime": 1793920488.3103251,
+    "seen": 1794185633.190576,
+    "ast_hash": "47b1cee243cb9d885d8ec2776979f223",
+    "semantic_hash": "47b1cee243cb9d885d8ec2776979f223"
+  },
+  "Sources/CramLabCore/Learning/ReviewService.swift": {
+    "mtime": 1793921111.0346775,
+    "seen": 1794185633.1905768,
+    "ast_hash": "9338d461550d6f00f79a2450d698127b",
+    "semantic_hash": "9338d461550d6f00f79a2450d698127b"
+  },
+  "Sources/CramLabCore/Learning/Stuck.swift": {
+    "mtime": 1793921201.613097,
+    "seen": 1794185633.1905768,
+    "ast_hash": "d20c008a70411fcd768513d7e9900650",
+    "semantic_hash": "d20c008a70411fcd768513d7e9900650"
+  },
+  "Sources/CramLabCore/Learning/StudyPlanner.swift": {
+    "mtime": 1793924848.4819267,
+    "seen": 1794185633.190578,
+    "ast_hash": "09f4c7dfc04c4120d2403817f582aaba",
+    "semantic_hash": "09f4c7dfc04c4120d2403817f582aaba"
+  },
+  "Sources/CramLabCore/Learning/XPRules.swift": {
+    "mtime": 1793920029.0431347,
+    "seen": 1794185633.190578,
+    "ast_hash": "b4680105dd6739c4ea58814b54f0a215",
+    "semantic_hash": "b4680105dd6739c4ea58814b54f0a215"
+  },
+  "Sources/CramLabCore/Math/Latex.swift": {
+    "mtime": 1793919125.2322528,
+    "seen": 1794185633.190578,
+    "ast_hash": "b18d1b45178fe2e73f357e26a88e02bf",
+    "semantic_hash": "b18d1b45178fe2e73f357e26a88e02bf"
+  },
+  "Sources/CramLabCore/Math/SymbolicMath.swift": {
+    "mtime": 1793934806.6464236,
+    "seen": 1794185633.190579,
+    "ast_hash": "0ad6576042ef2009b915eafa848b22c0",
+    "semantic_hash": "0ad6576042ef2009b915eafa848b22c0"
+  },
+  "Sources/CramLabCore/Persistence/AppDatabase.swift": {
+    "mtime": 1793924848.4817955,
+    "seen": 1794185633.190579,
+    "ast_hash": "22acea5ebf84c0285e28d8cc08f7bbf6",
+    "semantic_hash": "22acea5ebf84c0285e28d8cc08f7bbf6"
+  },
+  "Sources/CramLabCore/Practice/CodeRunner.swift": {
+    "mtime": 1793932550.2898262,
+    "seen": 1794185633.19058,
+    "ast_hash": "bd0df9f26eb6d71ff9c1f0f2020b9de2",
+    "semantic_hash": "bd0df9f26eb6d71ff9c1f0f2020b9de2"
+  },
+  "Sources/CramLabCore/Practice/PracticeService.swift": {
+    "mtime": 1793945933.604197,
+    "seen": 1794185633.19058,
+    "ast_hash": "a2a17544bce17757205fd9e0e98e082b",
+    "semantic_hash": "a2a17544bce17757205fd9e0e98e082b"
+  },
+  "Sources/CramLabCore/Questions/ArithmeticEvaluator.swift": {
+    "mtime": 1793917894.9117036,
+    "seen": 1794185633.19058,
+    "ast_hash": "83cd31e343ccab8e79bebf806f953469",
+    "semantic_hash": "83cd31e343ccab8e79bebf806f953469"
+  },
+  "Sources/CramLabCore/Questions/QuestionHashing.swift": {
+    "mtime": 1793917930.13962,
+    "seen": 1794185633.190581,
+    "ast_hash": "18e3212781cad2cf8576d7bb0c191497",
+    "semantic_hash": "18e3212781cad2cf8576d7bb0c191497"
+  },
+  "Sources/CramLabCore/Questions/QuestionService.swift": {
+    "mtime": 1793917992.8683872,
+    "seen": 1794185633.190581,
+    "ast_hash": "6f9f1b08889097b2d753642d0c4b6a66",
+    "semantic_hash": "6f9f1b08889097b2d753642d0c4b6a66"
+  },
+  "Sources/CramLabCore/Questions/QuestionSpec.swift": {
+    "mtime": 1793945933.604666,
+    "seen": 1794185633.190582,
+    "ast_hash": "aabf1464a882bdf76a7a4bb901c47c11",
+    "semantic_hash": "aabf1464a882bdf76a7a4bb901c47c11"
+  },
+  "Sources/CramLabCore/Questions/QuestionValidator.swift": {
+    "mtime": 1793933660.5686314,
+    "seen": 1794185633.190582,
+    "ast_hash": "2d51536eb1b207fa0dcd28bcc2fe7a09",
+    "semantic_hash": "2d51536eb1b207fa0dcd28bcc2fe7a09"
+  },
+  "Sources/CramLabCore/Settings/SettingsStore.swift": {
+    "mtime": 1793935066.093039,
+    "seen": 1794185633.190583,
+    "ast_hash": "741b34ad6061546c44290f571018bc6c",
+    "semantic_hash": "741b34ad6061546c44290f571018bc6c"
+  },
+  "Tests/CramLabCoreTests/AIBridgeTests.swift": {
+    "mtime": 1793918364.0501623,
+    "seen": 1794185633.190583,
+    "ast_hash": "c11c4b0c67cbd2482b84f830e6178846",
+    "semantic_hash": "c11c4b0c67cbd2482b84f830e6178846"
+  },
+  "Tests/CramLabCoreTests/AcceptanceTests.swift": {
+    "mtime": 1793922772.6492305,
+    "seen": 1794185633.190583,
+    "ast_hash": "fc9d716738562f5ceba3923e11a8b562",
+    "semantic_hash": "fc9d716738562f5ceba3923e11a8b562"
+  },
+  "Tests/CramLabCoreTests/AdaptiveTests.swift": {
+    "mtime": 1793921325.1971338,
+    "seen": 1794185633.1905842,
+    "ast_hash": "96a35cf0e386be8945c9da435e572e38",
+    "semantic_hash": "96a35cf0e386be8945c9da435e572e38"
+  },
+  "Tests/CramLabCoreTests/AdaptiveTests2.swift": {
+    "mtime": 1793921325.2013962,
+    "seen": 1794185633.1905842,
+    "ast_hash": "6b8dc519cdffdc5c9c4a7b54d3d062e9",
+    "semantic_hash": "6b8dc519cdffdc5c9c4a7b54d3d062e9"
+  },
+  "Tests/CramLabCoreTests/CalibrationTests.swift": {
+    "mtime": 1793934930.7318902,
+    "seen": 1794185633.1905851,
+    "ast_hash": "236e1ff8eb2eb7c98d29cd02f11375ad",
+    "semantic_hash": "236e1ff8eb2eb7c98d29cd02f11375ad"
+  },
+  "Tests/CramLabCoreTests/CodeAndMathTests.swift": {
+    "mtime": 1793919188.9893136,
+    "seen": 1794185633.1905851,
+    "ast_hash": "b38fddf17e4ae5a843f54370ba8484fb",
+    "semantic_hash": "b38fddf17e4ae5a843f54370ba8484fb"
+  },
+  "Tests/CramLabCoreTests/CodeTestsFlowTests.swift": {
+    "mtime": 1793933154.1007235,
+    "seen": 1794185633.190586,
+    "ast_hash": "073034114cdde4761309a982f6d04a5c",
+    "semantic_hash": "073034114cdde4761309a982f6d04a5c"
+  },
+  "Tests/CramLabCoreTests/CourseTests.swift": {
+    "mtime": 1793917498.0501804,
+    "seen": 1794185633.190586,
+    "ast_hash": "55919c3e017067ec1381fe37f9334a24",
+    "semantic_hash": "55919c3e017067ec1381fe37f9334a24"
+  },
+  "Tests/CramLabCoreTests/DirectAITests.swift": {
+    "mtime": 1793990039.064807,
+    "seen": 1794185633.190586,
+    "ast_hash": "7b3c6a533aa9d5ab1031636ceb4de58f",
+    "semantic_hash": "7b3c6a533aa9d5ab1031636ceb4de58f"
+  },
+  "Tests/CramLabCoreTests/DocumentTests.swift": {
+    "mtime": 1793917084.5955884,
+    "seen": 1794185633.1905868,
+    "ast_hash": "ddfaa87c1d656e43a50bc32992e742e0",
+    "semantic_hash": "ddfaa87c1d656e43a50bc32992e742e0"
+  },
+  "Tests/CramLabCoreTests/FSRSTests.swift": {
+    "mtime": 1793924641.929864,
+    "seen": 1794185633.190588,
+    "ast_hash": "365b828505deb79f19f3e0c3831943c7",
+    "semantic_hash": "365b828505deb79f19f3e0c3831943c7"
+  },
+  "Tests/CramLabCoreTests/Fixtures.swift": {
+    "mtime": 1793918185.01926,
+    "seen": 1794185633.190588,
+    "ast_hash": "b889250d22d935a3f08de64f8ddaf73b",
+    "semantic_hash": "b889250d22d935a3f08de64f8ddaf73b"
+  },
+  "Tests/CramLabCoreTests/M7Tests.swift": {
+    "mtime": 1793924719.920165,
+    "seen": 1794185633.190588,
+    "ast_hash": "a64b81d1ae09f884331e1fd0c635c39b",
+    "semantic_hash": "a64b81d1ae09f884331e1fd0c635c39b"
+  },
+  "Tests/CramLabCoreTests/PersistenceTests.swift": {
+    "mtime": 1793917084.591411,
+    "seen": 1794185633.190589,
+    "ast_hash": "ea2b5f9b569e2f4ea75f6040d061bf07",
+    "semantic_hash": "ea2b5f9b569e2f4ea75f6040d061bf07"
+  },
+  "Tests/CramLabCoreTests/PracticeTests.swift": {
+    "mtime": 1793919171.2562323,
+    "seen": 1794185633.190589,
+    "ast_hash": "35db961100c3982af4cd46783c9e7590",
+    "semantic_hash": "35db961100c3982af4cd46783c9e7590"
+  },
+  "Tests/CramLabCoreTests/ProgressionTests.swift": {
+    "mtime": 1793920302.990933,
+    "seen": 1794185633.19059,
+    "ast_hash": "30c7c797c1c445c63b90ca6ddfd68101",
+    "semantic_hash": "30c7c797c1c445c63b90ca6ddfd68101"
+  },
+  "Tests/CramLabCoreTests/ProgressionTests2.swift": {
+    "mtime": 1793920331.8872802,
+    "seen": 1794185633.19059,
+    "ast_hash": "fcfce407af4b7e4ec840fd917741a4aa",
+    "semantic_hash": "fcfce407af4b7e4ec840fd917741a4aa"
+  },
+  "Tests/CramLabCoreTests/QuestionTests.swift": {
+    "mtime": 1793918380.5413797,
+    "seen": 1794185633.19059,
+    "ast_hash": "077e741f1a07815afc33eaf491811ecc",
+    "semantic_hash": "077e741f1a07815afc33eaf491811ecc"
+  },
+  "Tests/CramLabCoreTests/SandboxRunnerTests.swift": {
+    "mtime": 1793932954.1620328,
+    "seen": 1794185633.1905909,
+    "ast_hash": "365ede242ae8464a666b7bb78f078aed",
+    "semantic_hash": "365ede242ae8464a666b7bb78f078aed"
+  },
+  "Tests/CramLabCoreTests/ScaleTests.swift": {
+    "mtime": 1793924774.3980994,
+    "seen": 1794185633.1905909,
+    "ast_hash": "1f65a57aa6ec2de785560487b4d28b5b",
+    "semantic_hash": "1f65a57aa6ec2de785560487b4d28b5b"
+  },
+  "Tests/CramLabCoreTests/Support.swift": {
+    "mtime": 1793917056.851996,
+    "seen": 1794185633.190592,
+    "ast_hash": "5475fa3f9bc5954f87ffb0acfe6b940a",
+    "semantic_hash": "5475fa3f9bc5954f87ffb0acfe6b940a"
+  },
+  "Tests/CramLabCoreTests/SymbolicMathTests.swift": {
+    "mtime": 1793934595.4154694,
+    "seen": 1794185633.190592,
+    "ast_hash": "73c05e119df0e60408cdae1d3f5f53f5",
+    "semantic_hash": "73c05e119df0e60408cdae1d3f5f53f5"
+  },
+  "Tests/CramLabCoreTests/TopicAnalysisTests.swift": {
+    "mtime": 1793990074.847224,
+    "seen": 1794185633.190593,
+    "ast_hash": "d1c20d4e77663ee92a282275cd18edef",
+    "semantic_hash": "d1c20d4e77663ee92a282275cd18edef"
+  },
+  "Tests/Fixtures/fsrs_transcription.json": {
+    "mtime": 1793920915.3542864,
+    "seen": 1794185633.190593,
+    "ast_hash": "6406c42fc8e572bdf88d8c544be6cd33",
+    "semantic_hash": "6406c42fc8e572bdf88d8c544be6cd33"
+  },
+  "scripts/build.sh": {
+    "mtime": 1793917439.6122475,
+    "seen": 1794185633.190593,
+    "ast_hash": "2bac7edca0acc057cece5b84695a3245",
+    "semantic_hash": "2bac7edca0acc057cece5b84695a3245"
+  },
+  "scripts/fsrs_vectors.py": {
+    "mtime": 1793920915.2896402,
+    "seen": 1794185633.190594,
+    "ast_hash": "c4d0c9ef3b34b6e9798dde200c3d49ac",
+    "semantic_hash": "c4d0c9ef3b34b6e9798dde200c3d49ac"
+  },
+  "scripts/toolchain-fix/overlay.template.yaml": {
+    "mtime": 1793917373.8239145,
+    "seen": 1794185633.190594,
+    "ast_hash": "3af939c2d8f6739dff74b70b67037d94",
+    "semantic_hash": "3af939c2d8f6739dff74b70b67037d94"
+  },
+  "README.md": {
+    "mtime": 1793935396.1400814,
+    "seen": 1794185633.1905951,
+    "ast_hash": "182a6528e44e870bad17132316085fd4",
+    "semantic_hash": "182a6528e44e870bad17132316085fd4"
+  },
+  "docs/ARCHITECTURE_DECISIONS.md": {
+    "mtime": 1793935396.1396217,
+    "seen": 1794185633.1905951,
+    "ast_hash": "a5d6362bcd1dbadeb65b099d6f834af4",
+    "semantic_hash": "a5d6362bcd1dbadeb65b099d6f834af4"
+  },
+  "docs/IMPLEMENTATION_STATUS.md": {
+    "mtime": 1793990341.0829937,
+    "seen": 1794185633.1905951,
+    "ast_hash": "76c6da8652386352b9378887e4c49ec0",
+    "semantic_hash": "76c6da8652386352b9378887e4c49ec0"
+  },
+  "docs/MASTERY.md": {
+    "mtime": 1793935401.2054775,
+    "seen": 1794185633.190596,
+    "ast_hash": "e1774158e5099de061193c46de09606d",
+    "semantic_hash": "e1774158e5099de061193c46de09606d"
+  },
+  "docs/SPACED_REPETITION.md": {
+    "mtime": 1793925926.2800024,
+    "seen": 1794185633.190596,
+    "ast_hash": "a88af5e2ebb12e79dda7dbf1d56a0b5e",
+    "semantic_hash": "a88af5e2ebb12e79dda7dbf1d56a0b5e"
+  }
+}
