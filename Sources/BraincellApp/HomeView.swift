@@ -110,8 +110,6 @@ struct HomeView: View {
                         model.startPlan(rec.plan.items, title: rec.headline, courseId: rec.course.id, assessmentId: rec.assessment?.id, mode: rec.plan.mode == .cram ? .cram : .mastery)
                     }.buttonStyle(.plain).font(.system(.body, design: .rounded, weight: .semibold)).foregroundStyle(Theme.accentHover)
                         .padding(.horizontal, 14).padding(.vertical, 7).background(.white, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-                    Button("Adjust plan…") { model.selectedCourseID = rec.course.id; model.requestedCourseTab = "plan"; model.selection = .courses }
-                        .buttonStyle(.plain).foregroundStyle(.white).underline()
                 }.padding(.top, Theme.Space.xs)
                 Text("Chosen from your own evidence, offline. Every suggestion has a reason.").font(.caption).foregroundStyle(.white.opacity(0.75))
             }

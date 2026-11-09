@@ -533,6 +533,62 @@ public final class AppDatabase: Sendable {
                 t.column("y", .double).notNull()
             }
         }
+        m.registerMigration("v12_library") { db in
+            // Soft deletion for courses. Study history keeps ON DELETE RESTRICT, so a purge never touches it: it removes materials and folders only.
+            try db.execute(sql: "ALTER TABLE courses ADD COLUMN deletedAt DATETIME")
+            try db.execute(sql: "ALTER TABLE courses ADD COLUMN purgeAfter DATETIME")
+            try db.execute(sql: "ALTER TABLE courses ADD COLUMN archivedByDelete BOOLEAN NOT NULL DEFAULT 0")
+            try db.execute(sql: "ALTER TABLE courses ADD COLUMN purgedAt DATETIME")
+            try db.create(table: "library_folders") { t in
+                t.primaryKey("id", .blob)
+                t.column("parentId", .blob).references("library_folders", onDelete: .cascade)
+                t.column("courseId", .blob).references("courses", onDelete: .cascade)   // nil = global Library folder
+                t.column("name", .text).notNull()
+                t.column("favorite", .boolean).notNull().defaults(to: false)
+                t.column("createdAt", .datetime).notNull()
+                t.column("modifiedAt", .datetime).notNull()
+                t.column("deletedAt", .datetime)
+                t.column("purgeAfter", .datetime)
+                t.column("deletedWith", .blob)                                          // id of the folder deletion that hid this row
+            }
+            try db.create(index: "library_folders_on_parent", on: "library_folders", columns: ["parentId"])
+            try db.create(index: "library_folders_on_course", on: "library_folders", columns: ["courseId"])
+            // documents: courseId becomes optional (global Library files) and files gain folder/favorite/deletion fields.
+            // SQLite can't relax NOT NULL in place, so rebuild the table; ids and every column are copied, children keep pointing at "documents".
+            try db.create(table: "documents_new") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).references("courses", onDelete: .cascade)
+                t.column("folderId", .blob).references("library_folders", onDelete: .setNull)
+                t.column("title", .text).notNull()
+                t.column("originalFilename", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("storedPath", .text).notNull()
+                t.column("sha256", .text).notNull()
+                t.column("byteCount", .integer).notNull()
+                t.column("kind", .text).notNull()
+                t.column("pageCount", .integer)
+                t.column("extractionStatus", .text).notNull()
+                t.column("extractionMethod", .text).notNull()
+                t.column("lowContentPageCount", .integer).notNull().defaults(to: 0)
+                t.column("importedAt", .datetime).notNull()
+                t.column("modifiedAt", .datetime).notNull()
+                t.column("favorite", .boolean).notNull().defaults(to: false)
+                t.column("deletedAt", .datetime)
+                t.column("purgeAfter", .datetime)
+                t.column("deletedWith", .blob)
+            }
+            try db.execute(sql: """
+                INSERT INTO documents_new (id, courseId, folderId, title, originalFilename, name, storedPath, sha256, byteCount, kind, pageCount,
+                                           extractionStatus, extractionMethod, lowContentPageCount, importedAt, modifiedAt, favorite)
+                SELECT id, courseId, NULL, title, originalFilename, originalFilename, storedPath, sha256, byteCount, kind, pageCount,
+                       extractionStatus, extractionMethod, lowContentPageCount, importedAt, importedAt, 0 FROM documents
+                """)
+            try db.drop(table: "documents")
+            try db.rename(table: "documents_new", to: "documents")
+            try db.create(index: "documents_on_course_folder", on: "documents", columns: ["courseId", "folderId"])
+            try db.create(index: "documents_on_folder", on: "documents", columns: ["folderId"])
+            try db.create(index: "documents_on_sha", on: "documents", columns: ["sha256"])
+        }
         return m
     }
 

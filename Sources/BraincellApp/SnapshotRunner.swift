@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import AppKit
 import BraincellCore
 
@@ -24,6 +25,8 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_LIBRARY_SNAP"] != nil { await libraryScenario(model, dir: dir); NSApp.terminate(nil); return }
+        if ProcessInfo.processInfo.environment["BRAINCELL_BENCH"] != nil { await Bench.run(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_SETTINGS_SNAP"] != nil { await settingsScenario(model, dir: dir); NSApp.terminate(nil); return }
         func shot(_ name: String) async {
             NSLog("snapshot: shot %@", name)
@@ -55,6 +58,58 @@ enum SnapshotRunner {
         NSApp.terminate(nil)
     }
 
+    /// Library screenshots from synthetic files. Only with BRAINCELL_LIBRARY_SNAP and BRAINCELL_DATA_DIR (never your real library).
+    static func libraryScenario(_ model: AppModel, dir: URL) async {
+        guard let lib = model.library, let courses = model.courses, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        let src = dir.appendingPathComponent("src", isDirectory: true); let fm = FileManager.default
+        func png(_ path: String, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) {
+            let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 320, pixelsHigh: 220, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            NSGradient(starting: NSColor(calibratedRed: r, green: g, blue: b, alpha: 1), ending: NSColor(calibratedRed: b, green: r, blue: g, alpha: 1))!.draw(in: NSRect(x: 0, y: 0, width: 320, height: 220), angle: 35)
+            NSGraphicsContext.restoreGraphicsState(); try? rep.representation(using: .png, properties: [:])?.write(to: u)
+        }
+        func pdf(_ path: String, _ text: String) {
+            let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            var box = CGRect(x: 0, y: 0, width: 612, height: 792); let ctx = CGContext(u as CFURL, mediaBox: &box, nil)!
+            ctx.beginPDFPage(nil); let attr = NSAttributedString(string: text, attributes: [.font: CTFontCreateWithName("Helvetica-Bold" as CFString, 28, nil)])
+            ctx.textPosition = CGPoint(x: 60, y: 700); CTLineDraw(CTLineCreateWithAttributedString(attr), ctx); ctx.endPDFPage(); ctx.closePDF()
+        }
+        func txt(_ path: String, _ s: String) { let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true); try? s.write(to: u, atomically: true, encoding: .utf8) }
+        guard let a = try? courses.createCourse(name: "COMP211"), let b = try? courses.createCourse(name: "COMP301 Midterm"), let old = try? courses.createCourse(name: "STAT435") else { return }
+        pdf("Lecture Notes/Week 1 Pointers.pdf", "Pointers"); pdf("Lecture Notes/Week 2 Memory.pdf", "Memory"); png("Lecture Notes/Images/stack diagram.png", 0.3, 0.5, 0.9); png("Lecture Notes/Images/heap.png", 0.9, 0.4, 0.3)
+        txt("Lecture Notes/syllabus.md", "# Syllabus\nWeek 1 ...")
+        _ = lib.importFolder(src.appendingPathComponent("Lecture Notes"), into: .course(a.id))
+        pdf("Slides.pdf", "UML Relationships"); png("whiteboard.png", 0.2, 0.7, 0.5); txt("Code Examples.txt", "int main() { return 0; }")
+        _ = lib.importFiles([src.appendingPathComponent("Slides.pdf"), src.appendingPathComponent("whiteboard.png"), src.appendingPathComponent("Code Examples.txt")], into: .course(b.id))
+        let research = try? lib.createFolder("Research", in: .root); _ = try? lib.createFolder("References", in: .root)
+        pdf("Paper.pdf", "A paper"); png("figure.png", 0.8, 0.8, 0.2); txt("reading list.txt", "1. Foo\n2. Bar")
+        _ = lib.importFiles([src.appendingPathComponent("Paper.pdf"), src.appendingPathComponent("figure.png"), src.appendingPathComponent("reading list.txt")], into: research.map { .folder($0) } ?? .root)
+        _ = lib.importFiles([src.appendingPathComponent("figure.png")], into: .root)
+        if let first = try? lib.list(.root).first(where: { $0.name == "figure.png" }) { try? lib.setFavorite([first.ref], true) }
+        pdf("old.pdf", "Old"); _ = lib.importFiles([src.appendingPathComponent("old.pdf")], into: .course(old.id)); try? lib.deleteCourse(old.id)
+        model.reload()
+        func shotWin(_ name: String) async {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.title != "Settings" })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        UserDefaults.standard.set("grid", forKey: "libraryLayout"); model.selection = .library
+        await shotWin("lib-1-root-grid")
+        UserDefaults.standard.set("list", forKey: "libraryLayout"); await shotWin("lib-2-root-list")
+        UserDefaults.standard.set("grid", forKey: "libraryLayout")
+        model.snapshotCourseTab = "materials"; model.selectedCourseID = a.id; model.selection = .courses
+        await shotWin("lib-3-course-materials")
+        model.snapshotLibrarySearch = "e"; model.selection = .library
+        await shotWin("lib-4-search")
+        model.snapshotLibrarySearch = ""; model.snapshotShowDeleted = true
+        await shotWin("lib-5-recently-deleted")
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.title != "Settings" && $0.contentView != nil }) { model.snapshotShowDeleted = false; w.setContentSize(NSSize(width: 900, height: 600)) }
+        UserDefaults.standard.set("grid", forKey: "libraryLayout"); model.snapshotLibrarySearch = "e"
+        await shotWin("lib-6-narrow")
+        UserDefaults.standard.removeObject(forKey: "libraryLayout")
+    }
+
     /// Screenshots of the four AI settings pages with synthetic data (never real keys). Only with BRAINCELL_SETTINGS_SNAP, and only against BRAINCELL_DATA_DIR.
     static func settingsScenario(_ model: AppModel, dir: URL) async {
         guard let gw = model.gateway, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
@@ -72,9 +127,25 @@ enum SnapshotRunner {
                 status: d == 3 && k == 0 ? "failed" : "success", latencyMs: 900 + d * 40, inputTokens: 1800 + d * 90, outputTokens: 600 + k * 120, cachedTokens: nil, costMicros: k % 2 == 0 ? Int64(2400 + d * 100) : nil, costBasis: k % 2 == 0 ? "estimated" : "unknown", errorCategory: d == 3 && k == 0 ? "rate_limit" : nil))
         } }
         model.aiConfig?.reload()
+        let wfOnly = ProcessInfo.processInfo.environment["BRAINCELL_WF_ONLY"]
+        if let wfOnly {                                      // workflow-page shots at several window sizes, optionally pre-expanded
+            UserDefaults.standard.set(SettingsSection.workflow.rawValue, forKey: "settingsSection")
+            UserDefaults.standard.set(wfOnly.split(separator: ",").map(String.init).filter { !$0.isEmpty }, forKey: "wf.expanded")
+            UserDefaults.standard.removeObject(forKey: "wf.cam")
+        }
         model.snapshotOpenSettings = true
         try? await Task.sleep(nanoseconds: 2_000_000_000)
         guard let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.identifier?.rawValue.contains("Settings") == true || $0.title.contains("General")) }) else { NSLog("snapshot: no settings window"); return }
+        if wfOnly != nil {
+            for (name, size) in [("wide", NSSize(width: 1500, height: 900)), ("default", NSSize(width: 1180, height: 780)), ("min", NSSize(width: 980, height: 640))] {
+                w.setContentSize(size)
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("wf-\(name).png"))
+            }
+            return
+        }
         w.setContentSize(NSSize(width: 1180, height: 780))
         for (i, s) in SettingsSection.allCases.enumerated() {
             UserDefaults.standard.set(s.rawValue, forKey: "settingsSection")
@@ -165,8 +236,8 @@ enum SnapshotRunner {
         }
         model.reload(); model.selection = .home; await shot("30-home-adaptive")
 
-        model.selectedCourseID = c.id; model.requestedCourseTab = "plan"; model.selection = .courses
-        await shot("31-plan")
+        model.selectedCourseID = c.id; model.selection = .library
+        await shot("31-library")
 
         let two: [String] = ["Which call removes", "Trace the iterator loop"]
         let ids = two.compactMap(qid)
@@ -292,7 +363,7 @@ enum SnapshotRunner {
         var failures = 0
         func check(_ ok: Bool, _ what: String) { log.append((ok ? "PASS " : "FAIL ") + what); if !ok { failures += 1 } }
         func sleep(_ s: Double) async { try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000)) }
-        guard let c = model.courseList.first, let p = model.practice, let rows = try? model.questions?.list(QuestionFilter()), let ev = model.evaluation else { log.append("FAIL setup"); return }
+        guard let c = model.courseList.first, let p = model.practice, let rows = try? model.questions?.list(QuestionFilter()), model.evaluation != nil else { log.append("FAIL setup"); return }
         func qid(_ t: String) -> UUID { rows.first { $0.title.hasPrefix(t) }!.id }
 
         // ── PracticeModel: the flow behind the practice screen's buttons ───────────────────────────────

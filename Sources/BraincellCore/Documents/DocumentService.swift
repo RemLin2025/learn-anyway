@@ -85,30 +85,53 @@ public struct DocumentService: Sendable {
     let storage: ManagedStorage
     public init(db: AppDatabase, storage: ManagedStorage) { self.db = db; self.storage = storage }
 
-    public func importFile(at url: URL, courseId: UUID) throws -> ImportResult {
-        let ext = url.pathExtension.lowercased()
-        let kind: DocumentKind
-        switch ext {
-        case "pdf": kind = .pdf
-        case "txt", "md", "markdown", "text": kind = .text
-        default: throw DocumentError.unsupportedType(ext)
+    static let imageExts: Set<String> = ["png", "jpg", "jpeg", "gif", "heic", "heif", "tif", "tiff", "bmp", "webp"]
+    static let videoExts: Set<String> = ["mp4", "mov", "m4v", "avi", "mkv", "webm"]
+    /// Larger than text limits: these files are copied and hashed in a stream, never loaded into memory.
+    public static let maxBinaryBytes = 4 * 1024 * 1024 * 1024
+
+    public static func kind(forExtension ext: String) -> DocumentKind {
+        switch ext.lowercased() {
+        case "pdf": .pdf
+        case "txt", "md", "markdown", "text": .text
+        case let e where imageExts.contains(e): .image
+        case let e where videoExts.contains(e): .video
+        default: .other
         }
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
-        guard size <= Self.maxFileBytes else { throw DocumentError.tooLarge(Self.maxFileBytes / 1_048_576) }
-        guard let data = try? Data(contentsOf: url) else { throw DocumentError.unreadable }
-        if kind == .pdf, !data.starts(with: Data("%PDF".utf8)) { throw DocumentError.notAPDF }
-        return try store(data: data, ext: ext, kind: kind, title: url.deletingPathExtension().lastPathComponent,
-                         originalFilename: url.lastPathComponent, courseId: courseId)
     }
 
-    public func importPasted(text: String, title: String, courseId: UUID) throws -> ImportResult {
+    /// Study-material import: only PDF and text, because only those can feed question generation.
+    public func importFile(at url: URL, courseId: UUID) throws -> ImportResult {
+        let ext = url.pathExtension.lowercased()
+        guard Self.kind(forExtension: ext) == .pdf || Self.kind(forExtension: ext) == .text else { throw DocumentError.unsupportedType(ext) }
+        return try importAnyFile(at: url, courseId: courseId, folderId: nil)
+    }
+
+    /// Library import: any file type. Text and PDFs are extracted; everything else is stored and previewable only.
+    public func importAnyFile(at url: URL, courseId: UUID?, folderId: UUID?, name: String? = nil) throws -> ImportResult {
+        let ext = url.pathExtension.lowercased()
+        let kind = Self.kind(forExtension: ext)
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let textual = kind == .pdf || kind == .text
+        guard size <= (textual ? Self.maxFileBytes : Self.maxBinaryBytes) else { throw DocumentError.tooLarge((textual ? Self.maxFileBytes : Self.maxBinaryBytes) / 1_048_576) }
+        let title = url.deletingPathExtension().lastPathComponent
+        if !textual {
+            guard FileManager.default.isReadableFile(atPath: url.path) else { throw DocumentError.unreadable }
+            return try storeBinary(at: url, ext: ext, kind: kind, title: title, originalFilename: name ?? url.lastPathComponent, courseId: courseId, folderId: folderId)
+        }
+        guard let data = try? Data(contentsOf: url) else { throw DocumentError.unreadable }
+        if kind == .pdf, !data.starts(with: Data("%PDF".utf8)) { throw DocumentError.notAPDF }
+        return try store(data: data, ext: ext, kind: kind, title: title, originalFilename: name ?? url.lastPathComponent, courseId: courseId, folderId: folderId)
+    }
+
+    public func importPasted(text: String, title: String, courseId: UUID?, folderId: UUID? = nil) throws -> ImportResult {
         let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !t.isEmpty else { throw DocumentError.emptyText }
         guard t.count <= Self.maxTextChars else { throw DocumentError.tooLarge(Self.maxTextChars / 1_000_000) }
         let name = title.trimmingCharacters(in: .whitespacesAndNewlines)
         let finalTitle = name.isEmpty ? "Pasted notes" : String(name.prefix(200))
         return try store(data: Data(t.utf8), ext: "txt", kind: .pasted, title: finalTitle,
-                         originalFilename: finalTitle + ".txt", courseId: courseId)
+                         originalFilename: finalTitle + ".txt", courseId: courseId, folderId: folderId)
     }
 
     public func chunks(documentId: UUID) throws -> [DocumentChunk] {
@@ -116,7 +139,8 @@ public struct DocumentService: Sendable {
     }
 
     public func documents(courseId: UUID) throws -> [Document] {
-        try db.read { try Document.filter(Column("courseId") == courseId).order(Column("importedAt").desc).fetchAll($0) }
+        // Deleted files (still recoverable) never feed study generation or the Materials list.
+        try db.read { try Document.filter(Column("courseId") == courseId && Column("deletedAt") == nil).order(Column("importedAt").desc).fetchAll($0) }
     }
 
     public func setAssessmentCoverage(documentId: UUID, assessmentIds: Set<UUID>) throws {
@@ -132,14 +156,69 @@ public struct DocumentService: Sendable {
 
     // MARK: Internals
 
-    private func store(data: Data, ext: String, kind: DocumentKind, title: String,
-                       originalFilename: String, courseId: UUID) throws -> ImportResult {
-        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
-        let existing = try db.read { d -> Document? in
-            guard try Course.exists(d, key: courseId) else { throw DocumentError.notFound }
-            return try Document.filter(Column("courseId") == courseId && Column("sha256") == hash).fetchOne(d)
+    /// A name that doesn't collide with a live sibling in the same course/folder: "a.pdf", "a 2.pdf", "a 3.pdf"…
+    func uniqueName(_ d: Database, _ desired: String, courseId: UUID?, folderId: UUID?) throws -> String {
+        let taken = Set(try String.fetchAll(d, sql: "SELECT name FROM documents WHERE courseId IS ? AND folderId IS ? AND deletedAt IS NULL", arguments: [courseId, folderId]).map { $0.lowercased() })
+        return Self.deduped(desired, taken: taken)
+    }
+    static func deduped(_ desired: String, taken: Set<String>) -> String {
+        guard taken.contains(desired.lowercased()) else { return desired }
+        let ns = desired as NSString, ext = ns.pathExtension, base = ns.deletingPathExtension
+        var n = 2
+        while true { let c = ext.isEmpty ? "\(base) \(n)" : "\(base) \(n).\(ext)"; if !taken.contains(c.lowercased()) { return c }; n += 1 }
+    }
+
+    private func existingDuplicate(courseId: UUID?, folderId: UUID?, hash: String) throws -> Document? {
+        try db.read { d in
+            if let courseId, !(try Course.exists(d, key: courseId)) { throw DocumentError.notFound }
+            return try Document.filter(sql: "courseId IS ? AND folderId IS ? AND sha256 = ? AND deletedAt IS NULL", arguments: [courseId, folderId, hash]).fetchOne(d)
         }
-        if let existing { return ImportResult(document: existing, wasDuplicate: true) }
+    }
+
+    private func make(id: UUID, courseId: UUID?, folderId: UUID?, title: String, originalFilename: String, rel: String, hash: String, bytes: Int,
+                      kind: DocumentKind, pages: Int?, status: ExtractionStatus, method: String, low: Int) throws -> Document {
+        let now = Date()
+        return try db.write { d in
+            let name = try uniqueName(d, originalFilename, courseId: courseId, folderId: folderId)
+            let doc = Document(id: id, courseId: courseId, folderId: folderId, title: (name as NSString).deletingPathExtension.isEmpty ? title : (name as NSString).deletingPathExtension,
+                               originalFilename: originalFilename, name: name, storedPath: rel, sha256: hash, byteCount: bytes, kind: kind, pageCount: pages,
+                               extractionStatus: status, extractionMethod: method, lowContentPageCount: low, importedAt: now, modifiedAt: now, favorite: false,
+                               deletedAt: nil, purgeAfter: nil, deletedWith: nil)
+            try doc.insert(d)
+            return doc
+        }
+    }
+
+    /// Images, video and other files: streamed copy + streamed hash, no extraction, never held in memory.
+    private func storeBinary(at url: URL, ext: String, kind: DocumentKind, title: String, originalFilename: String, courseId: UUID?, folderId: UUID?) throws -> ImportResult {
+        let hash = try Self.streamingSHA256(url)
+        if let existing = try existingDuplicate(courseId: courseId, folderId: folderId, hash: hash) { return ImportResult(document: existing, wasDuplicate: true) }
+        let id = UUID()
+        let rel = "Documents/\(id.uuidString)/original" + (ext.isEmpty ? "" : ".\(ext)")
+        let dest = storage.url(forStoredPath: rel)
+        let fm = FileManager.default
+        try fm.createDirectory(at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
+        do {
+            try fm.copyItem(at: url, to: dest)
+            let bytes = (try? dest.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            let doc = try make(id: id, courseId: courseId, folderId: folderId, title: title, originalFilename: originalFilename, rel: rel, hash: hash, bytes: bytes,
+                               kind: kind, pages: nil, status: .notApplicable, method: "none", low: 0)
+            return ImportResult(document: doc, wasDuplicate: false)
+        } catch { try? fm.removeItem(at: dest.deletingLastPathComponent()); throw error }
+    }
+
+    static func streamingSHA256(_ url: URL) throws -> String {
+        guard let h = try? FileHandle(forReadingFrom: url) else { throw DocumentError.unreadable }
+        defer { try? h.close() }
+        var hasher = SHA256()
+        while let chunk = try h.read(upToCount: 1 << 20), !chunk.isEmpty { hasher.update(data: chunk) }
+        return hasher.finalize().map { String(format: "%02x", $0) }.joined()
+    }
+
+    private func store(data: Data, ext: String, kind: DocumentKind, title: String,
+                       originalFilename: String, courseId: UUID?, folderId: UUID?) throws -> ImportResult {
+        let hash = SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+        if let existing = try existingDuplicate(courseId: courseId, folderId: folderId, hash: hash) { return ImportResult(document: existing, wasDuplicate: true) }
 
         let id = UUID()
         let rel = "Documents/\(id.uuidString)/original.\(ext)"
@@ -152,16 +231,12 @@ public struct DocumentService: Sendable {
             let chunks = Self.chunk(extraction.pages, documentId: id)
             let low = chunks.filter(\.isLowContent).count
             let status: ExtractionStatus = chunks.isEmpty || low == chunks.count ? .failed : (low > 0 ? .partial : .ok)
-            let doc = Document(id: id, courseId: courseId, title: title, originalFilename: originalFilename,
-                               storedPath: rel, sha256: hash, byteCount: data.count, kind: kind,
-                               pageCount: extraction.pageCount, extractionStatus: status,
-                               extractionMethod: extraction.method, lowContentPageCount: low, importedAt: Date())
-            try db.write { d in
-                try doc.insert(d)
-                for c in chunks { try c.insert(d) }
-            }
+            let doc = try make(id: id, courseId: courseId, folderId: folderId, title: title, originalFilename: originalFilename, rel: rel, hash: hash, bytes: data.count,
+                               kind: kind, pages: extraction.pageCount, status: status, method: extraction.method, low: low)
+            try db.write { d in for c in chunks { try c.insert(d) } }
             return ImportResult(document: doc, wasDuplicate: false)
         } catch {
+            try? db.write { _ = try Document.deleteOne($0, key: id) }
             try? fm.removeItem(at: dest.deletingLastPathComponent()) // no orphaned copy on failure
             throw error
         }
@@ -178,6 +253,7 @@ public struct DocumentService: Sendable {
                 ExtractedPage(pageNumber: i + 1, text: pdf.page(at: i)?.string ?? "")
             }
             return Extraction(pages: pages, pageCount: pdf.pageCount, method: "pdfkit-text")
+        case .image, .video, .other: return Extraction(pages: [], pageCount: nil, method: "none")
         case .text, .pasted:
             guard let s = (try? String(contentsOf: url, encoding: .utf8)) ?? (try? String(contentsOf: url, encoding: .isoLatin1))
             else { throw DocumentError.unreadable }

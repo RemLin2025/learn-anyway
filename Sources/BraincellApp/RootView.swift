@@ -24,6 +24,7 @@ struct RootView: View {
                 switch model.selection ?? .home {
                 case .home: HomeView()
                 case .courses: CoursesView()
+                case .library: LibraryView()
                 case .questionBank: QuestionBankView()
                 case .aiTasks: AITaskCenterView()
                 case .skills: SkillsView()
