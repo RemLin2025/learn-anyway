@@ -31,10 +31,24 @@ public struct ModelRouter: Sendable {
         return Target(connection: c, model: m)
     }
 
-    public func resolve(_ task: WorkflowTask) throws -> Resolution {
-        let route = try store.route(task.id)
-        let conns = Dictionary(uniqueKeysWithValues: try store.connections().map { ($0.id, $0) })
-        let models = try store.models(capability: task.capability)
+    /// One read of everything routing needs, so resolving every task costs one pass instead of several queries each.
+    struct Snapshot {
+        let routes: [String: TaskRoute]; let conns: [UUID: AIConnection]; let models: [AIModelRecord]; let defaults: [Capability: CapabilityDefault]
+    }
+    func snapshot() throws -> Snapshot {
+        Snapshot(routes: try store.routes(), conns: Dictionary(uniqueKeysWithValues: try store.connections().map { ($0.id, $0) }), models: try store.models(),
+                 defaults: Dictionary(uniqueKeysWithValues: try store.capabilityDefaults().map { ($0.capability, $0) }))
+    }
+    public func resolveAll(_ tasks: [WorkflowTask] = WorkflowTask.all) throws -> [String: Resolution] {
+        let snap = try snapshot()
+        return Dictionary(uniqueKeysWithValues: tasks.map { ($0.id, resolve($0, snap)) })
+    }
+    public func resolve(_ task: WorkflowTask) throws -> Resolution { resolve(task, try snapshot()) }
+
+    func resolve(_ task: WorkflowTask, _ snap: Snapshot) -> Resolution {
+        let route = snap.routes[task.id] ?? TaskRoute(task: task.id)
+        let conns = snap.conns
+        let models = snap.models.filter { $0.capability == task.capability }
         var r = Resolution()
         if route.manualBridge {
             r.manual = true; r.trace.append("Uses the manual ChatGPT Bridge: you copy the request into ChatGPT and import the reply.")
@@ -46,7 +60,7 @@ public struct ModelRouter: Sendable {
         } else {
             r.trace += why; why = []
             if !route.inherit { r.trace.append("Own setting unusable; falling back to the default.") }
-            if let d = try store.capabilityDefault(task.capability),
+            if let d = snap.defaults[task.capability],
                let t = target(d.connectionId, d.modelId, cap: task.capability, conns: conns, models: models, why: &why, label: "\(task.capability.label) default") {
                 r.primary = t; r.inherited = true; r.trace.append("Following the \(task.capability.label) default: \(t.label).")
             } else { r.trace += why }

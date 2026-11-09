@@ -190,8 +190,6 @@ struct QuestionBankView: View {
     private func loadSkills(for courseId: UUID) { skills = (try? model.courses?.skills(courseId: courseId)) ?? [] }
 }
 
-extension QuestionDetail: Identifiable { public var id: UUID { revision.id } }
-
 struct SkillTagSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss

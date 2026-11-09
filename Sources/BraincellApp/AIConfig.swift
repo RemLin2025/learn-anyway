@@ -9,6 +9,8 @@ final class AIConfig: ObservableObject {
     @Published private(set) var models: [AIModelRecord] = []
     @Published private(set) var defaults: [Capability: CapabilityDefault] = [:]
     @Published private(set) var routes: [String: TaskRoute] = [:]
+    /// Every task's resolved model, computed from one database read per reload (never per render).
+    @Published private(set) var resolutions: [String: Resolution] = [:]
     @Published var busy: Set<String> = []
     @Published var message: String?
     @Published var error: String?
@@ -22,13 +24,14 @@ final class AIConfig: ObservableObject {
         models = (try? gw.store.models()) ?? []
         defaults = Dictionary(uniqueKeysWithValues: ((try? gw.store.capabilityDefaults()) ?? []).map { ($0.capability, $0) })
         routes = (try? gw.store.routes()) ?? [:]
+        resolutions = (try? gw.resolveAll()) ?? [:]
         rev += 1
     }
 
     func connections(for provider: String) -> [AIConnection] { connections.filter { $0.providerId == provider } }
     func models(_ c: AIConnection, _ cap: Capability? = nil) -> [AIModelRecord] { models.filter { $0.connectionId == c.id && (cap == nil || $0.capability == cap) } }
     func connection(_ id: UUID?) -> AIConnection? { connections.first { $0.id == id } }
-    func resolution(_ t: WorkflowTask) -> Resolution { (try? gw.resolve(t)) ?? Resolution() }
+    func resolution(_ t: WorkflowTask) -> Resolution { resolutions[t.id] ?? Resolution() }
 
     /// Per-capability readiness for the overview strip: ready only when a usable default exists AND an adapter is implemented.
     func readiness(_ c: Capability) -> (label: String, ok: Bool) {

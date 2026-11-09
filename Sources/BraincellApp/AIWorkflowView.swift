@@ -1,233 +1,147 @@
 import SwiftUI
 import BraincellCore
 
-private let defaultNodeId = "default.llm"
-private let nodeSize = CGSize(width: 184, height: 76)
+private let defaultNodeId = VisualNode.defaultId
 
-/// What a node shows, computed from the real router so the canvas can never disagree with what requests actually use.
-struct NodeInfo: Equatable {
-    var model: String; var provider: String; var mode: String; var ready: Bool; var manual: Bool; var unavailable: Bool
-}
-
+/// AI Workflow page: compact toolbar, a cached canvas that owns most of the space, and an inspector beside it.
 struct AIWorkflowView: View {
     @ObservedObject var cfg: AIConfig
-    @State private var positions: [String: CGPoint] = [:]
-    @State private var infos: [String: NodeInfo] = [:]
-    @State private var scale: CGFloat = 0.75
-    @State private var pan: CGSize = .zero
-    @State private var panStart: CGSize?
-    @State private var magBase: CGFloat?
-    @State private var selected: String?
-    @State private var showDeps = false
-    @State private var viewport: CGSize = .zero
-    @State private var dragStart: [String: CGPoint] = [:]
+    @StateObject private var state: WorkflowState
+    @State private var vp = Viewport()      // @State, not @StateObject: the page must NOT re-render on every pan/zoom tick
     @State private var confirmResetAll = false
+    @State private var showLegend = false
 
-    private static func defaultLayout() -> [String: CGPoint] {
-        var out: [String: CGPoint] = [defaultNodeId: CGPoint(x: 560, y: 60)]
-        var y: CGFloat = 220
-        for g in TaskGroup.allCases {
-            let tasks = WorkflowTask.all.filter { $0.group == g }
-            for (i, t) in tasks.enumerated() { out[t.id] = CGPoint(x: 120 + CGFloat(i % 6) * 214, y: y + CGFloat(i / 6) * 110) }
-            y += CGFloat((tasks.count + 5) / 6) * 110 + 50
-        }
-        return out
-    }
-    private var canvasSize: CGSize {
-        let xs = positions.values.map(\.x), ys = positions.values.map(\.y)
-        return CGSize(width: (xs.max() ?? 800) + 200, height: (ys.max() ?? 600) + 120)
-    }
-    private func pos(_ id: String) -> CGPoint { positions[id] ?? Self.defaultLayout()[id] ?? .zero }
+    init(cfg: AIConfig) { self.cfg = cfg; _state = StateObject(wrappedValue: WorkflowState(cfg: cfg)) }
 
     var body: some View {
-        AIPage(title: "AI Workflow", subtitle: "Choose which model handles each learning task. Tasks that follow the default change when you change it.") {
+        AIPage(title: "AI Workflow", compact: true) {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    toolbar
-                    canvas
+                    ViewThatFits(in: .horizontal) { fullBar; compactBar }
+                        .padding(.horizontal, Theme.Space.lg).frame(height: 48).controlSize(.small)
+                    Divider()
+                    WorkflowCanvas(state: state, vp: vp)
                 }
-                if let s = selected {
+                if let s = state.selected {
                     Divider()
                     ScrollView {
-                        Group {
-                            if s == defaultNodeId { DefaultInspector(cfg: cfg).id(s) }
-                            else if let t = WorkflowTask.find(s) { TaskInspector(cfg: cfg, task: t, onReset: refresh).id(s) }
-                        }.padding(Theme.Space.lg)
+                        inspector(s).padding(Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
                     }.frame(width: 340).background(Theme.surface)
                 }
             }
         }
-        .task(id: cfg.rev) { refresh() }
-        .onAppear { positions = Self.defaultLayout().merging(((try? cfg.gw.store.layout()) ?? [:]).mapValues { CGPoint(x: $0.x, y: $0.y) }) { $1 } }
+        // Wait a beat so the inspector has resized the canvas before deciding whether the node is on screen.
+        .task(id: "\(state.selected ?? "")-\(state.layout.nodeIndex.count)") {
+            try? await Task.sleep(nanoseconds: 80_000_000)
+            if let s = state.selected, let n = state.layout.node(s) { vp.reveal(n.rect) }
+        }
         .confirmationDialog("Reset every task to follow the default?", isPresented: $confirmResetAll, titleVisibility: .visible) {
             Button("Reset all tasks", role: .destructive) { try? cfg.gw.store.resetAllRoutes(); cfg.reload() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Custom models, fallbacks, prompts and manual-bridge choices for every task are removed. Provider connections and defaults are kept.") }
     }
 
-    // MARK: Info
-
-    private func refresh() {
-        var out: [String: NodeInfo] = [:]
-        let d = cfg.defaults[.llm]
-        let dc = d.flatMap { cfg.connection($0.connectionId) }
-        out[defaultNodeId] = NodeInfo(model: d?.modelId ?? "Not set", provider: dc?.name ?? "No LLM provider connected", mode: "Parts following it: \(WorkflowTask.all.filter { $0.capability == .llm && (cfg.routes[$0.id]?.inherit ?? true) && cfg.routes[$0.id]?.manualBridge != true }.count)", ready: d != nil, manual: false, unavailable: false)
-        for t in WorkflowTask.all {
-            let r = cfg.resolution(t); let route = cfg.routes[t.id]
-            let supported = ProviderRegistry.all.contains { $0.supports(t.capability) }
-            if r.manual { out[t.id] = NodeInfo(model: "Manual ChatGPT Bridge", provider: "You copy and import", mode: "Own setting", ready: true, manual: true, unavailable: false) }
-            else if let p = r.primary { out[t.id] = NodeInfo(model: p.model.displayName, provider: p.connection.name, mode: r.inherited ? "Follows default" : "Own setting", ready: true, manual: false, unavailable: false) }
-            else { out[t.id] = NodeInfo(model: supported ? "Not set" : "Not available yet", provider: supported ? "" : "No \(t.capability.label) adapter", mode: route?.inherit == false ? "Own setting" : "Follows default", ready: false, manual: false, unavailable: !supported) }
-        }
-        infos = out
-    }
-
     // MARK: Toolbar
 
-    private var toolbar: some View {
-        HStack(spacing: Theme.Space.md) {
-            Picker("Task", selection: Binding(get: { selected ?? "" }, set: { selected = $0.isEmpty ? nil : $0 })) {
-                Text("Select a task…").tag("")
-                Text("Default Model").tag(defaultNodeId)
-                ForEach(TaskGroup.allCases, id: \.self) { g in Section(g.rawValue) { ForEach(WorkflowTask.all.filter { $0.group == g }) { Text($0.title).tag($0.id) } } }
-            }.frame(width: 240).accessibilityLabel("Select a task")
-            Toggle("Show dependencies", isOn: $showDeps).toggleStyle(.checkbox)
-            Spacer()
-            legend
-            Button("Reset layout") { try? cfg.gw.store.resetLayout(); positions = Self.defaultLayout(); fit() }
-            Button("Reset all tasks…", role: .destructive) { confirmResetAll = true }
-        }.padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm)
+    private var picker: some View {
+        Picker("Task", selection: Binding(get: { state.selected ?? "" }, set: { state.select($0.isEmpty ? nil : $0) })) {
+            Text("Select a task…").tag("")
+            Text("Default Model").tag(defaultNodeId)
+            ForEach(TaskGroup.allCases, id: \.self) { g in
+                Section(g.rawValue) {
+                    Text(g.rawValue).tag(VisualNode.groupId(g))
+                    ForEach(state.tasks(in: g)) { Text($0.title).tag($0.id) }
+                }
+            }
+        }.labelsHidden().frame(width: 230).accessibilityLabel("Select a task")
+    }
+
+    private var fullBar: some View {
+        HStack(spacing: 10) {
+            picker
+            Button("Expand all") { state.setAll(true) }.lineLimit(1).fixedSize()
+            Button("Collapse all") { state.setAll(false) }.lineLimit(1).fixedSize()
+            Spacer(minLength: 12)
+            Toggle("Dependencies", isOn: $state.showDeps).toggleStyle(.checkbox).lineLimit(1).fixedSize()
+            Button { showLegend.toggle() } label: { Image(systemName: "info.circle") }.help("Connection legend").accessibilityLabel("Connection legend")
+                .popover(isPresented: $showLegend, arrowEdge: .bottom) { legend }
+            Button("Reset layout") { state.resetLayout(); vp.fit(state.fitRect(viewport: vp.size)) }.lineLimit(1).fixedSize()
+            Menu { Button("Reset all tasks…", role: .destructive) { confirmResetAll = true } } label: { Image(systemName: "ellipsis.circle") }
+                .menuStyle(.borderlessButton).fixedSize().accessibilityLabel("More")
+        }
+    }
+
+    private var compactBar: some View {
+        HStack(spacing: 10) {
+            picker
+            Spacer(minLength: 8)
+            Menu {
+                Button("Expand all") { state.setAll(true) }
+                Button("Collapse all") { state.setAll(false) }
+                Toggle("Show dependencies", isOn: $state.showDeps)
+                Button("Reset layout") { state.resetLayout(); vp.fit(state.fitRect(viewport: vp.size)) }
+                Button("Connection legend") { showLegend = true }
+                Divider()
+                Button("Reset all tasks…", role: .destructive) { confirmResetAll = true }
+            } label: { Label("Options", systemImage: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
+                .popover(isPresented: $showLegend, arrowEdge: .bottom) { legend }
+        }
     }
 
     private var legend: some View {
-        HStack(spacing: Theme.Space.md) {
-            HStack(spacing: 5) { Rectangle().fill(Theme.accent).frame(width: 22, height: 2); Text("Follows default") }
-            HStack(spacing: 5) { Line().stroke(Theme.textSecondary, style: StrokeStyle(lineWidth: 1.5, dash: [4, 3])).frame(width: 22, height: 2); Text("Own setting") }
-            HStack(spacing: 5) { Image(systemName: "arrow.right").font(.caption2); Text("Needs output of") }
-        }.font(Theme.meta).foregroundStyle(Theme.textSecondary)
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            legendRow("Model inheritance", "The task uses the default model.", dash: false, color: Theme.accent)
+            legendRow("Workflow dependency", "The task needs another task’s output.", dash: true, color: Theme.textSecondary)
+            legendRow("Selected task", "Its direct connections; the rest fade.", dash: false, color: Theme.accent, thick: true)
+            Text("Tasks with their own model setting don’t follow the default, so they have no purple line.").font(Theme.meta).foregroundStyle(Theme.textSecondary).frame(width: 260, alignment: .leading)
+        }.padding(Theme.Space.lg)
+    }
+    private func legendRow(_ t: String, _ d: String, dash: Bool, color: Color, thick: Bool = false) -> some View {
+        HStack(alignment: .top, spacing: Theme.Space.md) {
+            Path { p in p.move(to: CGPoint(x: 0, y: 6)); p.addLine(to: CGPoint(x: 34, y: 6)) }.stroke(color, style: StrokeStyle(lineWidth: thick ? 2.4 : 1.6, dash: dash ? [5, 4] : [])).frame(width: 34, height: 12)
+            VStack(alignment: .leading, spacing: 1) { Text(t).font(.system(.callout, design: .rounded, weight: .semibold)); Text(d).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+        }
     }
 
-    // MARK: Canvas
+    // MARK: Inspector
 
-    private var canvas: some View {
-        GeometryReader { geo in
-            ZStack(alignment: .topLeading) {
-                DotGrid(scale: scale, offset: pan).accessibilityHidden(true)
-                ZStack(alignment: .topLeading) {
-                    Canvas { ctx, _ in drawEdges(ctx) }.frame(width: canvasSize.width, height: canvasSize.height).allowsHitTesting(false)
-                    ForEach(TaskGroup.allCases, id: \.self) { g in
-                        let pts = WorkflowTask.all.filter { $0.group == g }.map { pos($0.id) }
-                        if let minY = pts.map(\.y).min(), let minX = pts.map(\.x).min() {
-                            Text(g.rawValue.uppercased()).font(.system(size: 11, weight: .semibold, design: .rounded)).tracking(0.8).foregroundStyle(Theme.textSecondary)
-                                .frame(width: 300, alignment: .leading).position(x: minX - nodeSize.width / 2 + 150, y: minY - nodeSize.height / 2 - 14)
+    @ViewBuilder private func inspector(_ s: String) -> some View {
+        HStack { Spacer(); Button { state.select(nil) } label: { Image(systemName: "xmark") }.buttonStyle(.plain).foregroundStyle(Theme.textSecondary).accessibilityLabel("Close inspector") }
+        if s == defaultNodeId { DefaultInspector(cfg: cfg).id(s) }
+        else if let g = TaskGroup.allCases.first(where: { VisualNode.groupId($0) == s }) { GroupInspector(cfg: cfg, state: state, group: g).id(s) }
+        else if let t = WorkflowTask.find(s) { TaskInspector(cfg: cfg, state: state, task: t).id(s) }
+    }
+}
+
+private struct GroupInspector: View {
+    @ObservedObject var cfg: AIConfig
+    @ObservedObject var state: WorkflowState
+    let group: TaskGroup
+    var body: some View {
+        let ts = state.tasks(in: group)
+        let ready = ts.filter { cfg.resolution($0).isReady }.count
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Label(group.rawValue, systemImage: WorkflowState.symbol(group)).font(Theme.sectionTitle)
+            Text("\(ts.count) tasks · \(ready) configured").foregroundStyle(Theme.textSecondary)
+            MeterBar(value: Double(ready) / Double(max(1, ts.count)), tint: ready == ts.count ? Theme.mastery : Theme.accent)
+            Button(state.expanded.contains(group) ? "Collapse category" : "Expand category") { state.toggle(group) }
+            Text("Collapsing only hides the tasks on the canvas. Their settings and how requests are routed don’t change.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+            Divider()
+            ForEach(ts) { t in
+                let r = cfg.resolution(t)
+                Button { state.select(t.id) } label: {
+                    HStack(spacing: Theme.Space.sm) {
+                        Image(systemName: t.capability.symbol).frame(width: 20).foregroundStyle(Theme.accent)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(t.title).font(.system(.callout, design: .rounded, weight: .medium))
+                            Text(r.manual ? "Manual ChatGPT Bridge" : r.primary.map { $0.model.displayName } ?? (ProviderRegistry.all.contains { $0.supports(t.capability) } ? "Not configured" : "No adapter yet")).font(Theme.meta).foregroundStyle(Theme.textSecondary).lineLimit(1)
                         }
-                    }
-                    nodeLayer(defaultNodeId, title: "Default Model", symbol: "sparkles", sub: nil)
-                    ForEach(WorkflowTask.all) { t in nodeLayer(t.id, title: t.title, symbol: t.capability.symbol, sub: t.capability == .llm ? nil : t.capability.label) }
-                }
-                .frame(width: canvasSize.width, height: canvasSize.height, alignment: .topLeading)
-                .scaleEffect(scale, anchor: .topLeading).offset(pan)
-                controls.padding(Theme.Space.md).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .bottomLeading)
+                        Spacer()
+                        Circle().fill(r.isReady ? Theme.mastery : Theme.textSecondary.opacity(0.5)).frame(width: 8, height: 8)
+                    }.contentShape(Rectangle())
+                }.buttonStyle(.plain)
             }
-            .contentShape(Rectangle())
-            .gesture(DragGesture().onChanged { v in let s = panStart ?? pan; panStart = s; pan = CGSize(width: s.width + v.translation.width, height: s.height + v.translation.height) }.onEnded { _ in panStart = nil })
-            .onTapGesture(count: 2) { fit() }
-            .onTapGesture { selected = nil }
-            .gesture(MagnifyGesture().onChanged { v in let b = magBase ?? scale; magBase = b; scale = min(2, max(0.25, b * v.magnification)) }.onEnded { _ in magBase = nil })
-            .onAppear { viewport = geo.size; DispatchQueue.main.async { fit() } }
-            .onChange(of: geo.size) { _, s in viewport = s }
-            .clipShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
-            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.border))
-            .padding(Theme.Space.lg)
         }
-    }
-
-    private var controls: some View {
-        HStack(spacing: Theme.Space.sm) {
-            Button { zoom(0.85) } label: { Image(systemName: "minus") }.accessibilityLabel("Zoom out")
-            Text("\(Int(scale * 100))%").font(.system(.callout, design: .rounded)).monospacedDigit().frame(width: 44)
-            Button { zoom(1.18) } label: { Image(systemName: "plus") }.accessibilityLabel("Zoom in")
-            Button { fit() } label: { Image(systemName: "arrow.up.left.and.down.right.magnifyingglass") }.accessibilityLabel("Fit to view").help("Fit to view (or double-click empty space)")
-            Text("Drag to pan · drag nodes to rearrange").font(Theme.meta).foregroundStyle(Theme.textSecondary).padding(.leading, Theme.Space.sm)
-        }.padding(Theme.Space.sm).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control)).overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
-    }
-
-    private func zoom(_ f: CGFloat) { scale = min(2, max(0.25, scale * f)) }
-    private func fit() {
-        guard viewport.width > 0 else { return }
-        let s = min(viewport.width / canvasSize.width, viewport.height / canvasSize.height, 1.2) * 0.95
-        scale = max(0.25, s); pan = CGSize(width: (viewport.width - canvasSize.width * scale) / 2, height: 8)
-    }
-
-    private func nodeLayer(_ id: String, title: String, symbol: String, sub: String?) -> some View {
-        let info = infos[id]
-        return NodeCard(title: title, symbol: symbol, info: info, selected: selected == id, isDefault: id == defaultNodeId)
-            .frame(width: nodeSize.width, height: nodeSize.height)
-            .position(pos(id))
-            .gesture(DragGesture(minimumDistance: 3).onChanged { v in
-                let s = dragStart[id] ?? pos(id); dragStart[id] = s
-                positions[id] = CGPoint(x: s.x + v.translation.width / scale, y: s.y + v.translation.height / scale)
-            }.onEnded { _ in
-                dragStart[id] = nil; let p = pos(id); try? cfg.gw.store.save(LayoutPoint(task: id, x: p.x, y: p.y))
-            })
-            .onTapGesture { selected = id }
-            .accessibilityElement(children: .combine).accessibilityAddTraits(.isButton).accessibilityAction { selected = id }
-            .accessibilityLabel("\(title). \(info?.model ?? "") \(info?.provider ?? ""). \(info?.mode ?? "")")
-    }
-
-    private func drawEdges(_ ctx: GraphicsContext) {
-        func edge(_ a: CGPoint, _ b: CGPoint, _ color: Color, width: CGFloat, dash: [CGFloat] = [], arrow: Bool = false) {
-            var p = Path(); let s = CGPoint(x: a.x, y: a.y + nodeSize.height / 2), e = CGPoint(x: b.x, y: b.y - nodeSize.height / 2)
-            let dy = max(30, abs(e.y - s.y) / 2)
-            p.move(to: s); p.addCurve(to: e, control1: CGPoint(x: s.x, y: s.y + dy), control2: CGPoint(x: e.x, y: e.y - dy))
-            ctx.stroke(p, with: .color(color), style: StrokeStyle(lineWidth: width, lineCap: .round, dash: dash))
-            if arrow { var h = Path(); h.move(to: CGPoint(x: e.x - 4, y: e.y - 7)); h.addLine(to: e); h.addLine(to: CGPoint(x: e.x + 4, y: e.y - 7)); ctx.stroke(h, with: .color(color), lineWidth: width) }
-        }
-        let d = pos(defaultNodeId)
-        for t in WorkflowTask.all where t.capability == .llm {
-            let own = !(cfg.routes[t.id]?.inherit ?? true) || cfg.routes[t.id]?.manualBridge == true
-            edge(d, pos(t.id), own ? Theme.textSecondary.opacity(0.7) : Theme.accent.opacity(selected == t.id ? 1 : 0.3), width: own ? 1.4 : 1.2, dash: own ? [5, 4] : [])
-        }
-        if showDeps {
-            for t in WorkflowTask.all { for dep in t.dependsOn where WorkflowTask.find(dep) != nil {
-                let hot = selected == t.id || selected == dep
-                edge(pos(dep), pos(t.id), Theme.textSecondary.opacity(hot ? 0.9 : 0.28), width: hot ? 1.6 : 1, arrow: true)
-            } }
-        }
-    }
-}
-
-private struct Line: Shape { func path(in r: CGRect) -> Path { var p = Path(); p.move(to: CGPoint(x: 0, y: r.midY)); p.addLine(to: CGPoint(x: r.maxX, y: r.midY)); return p } }
-
-private struct DotGrid: View {
-    let scale: CGFloat; let offset: CGSize
-    var body: some View {
-        Canvas { ctx, size in
-            let step = max(10, 24 * scale)
-            let ox = offset.width.truncatingRemainder(dividingBy: step), oy = offset.height.truncatingRemainder(dividingBy: step)
-            var y = oy
-            while y < size.height { var x = ox; while x < size.width { ctx.fill(Path(ellipseIn: CGRect(x: x, y: y, width: 1.6, height: 1.6)), with: .color(Theme.textSecondary.opacity(0.28))); x += step }; y += step }
-        }.background(Theme.elevated.opacity(0.5))
-    }
-}
-
-private struct NodeCard: View {
-    let title: String; let symbol: String; let info: NodeInfo?; let selected: Bool; let isDefault: Bool
-    var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: symbol).font(.system(size: 11, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 20, height: 20).background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 6))
-                Text(title).font(.system(size: 12, weight: .semibold, design: .rounded)).lineLimit(1)
-                Spacer(minLength: 0)
-                if info?.manual == true { Image(systemName: "hand.raised").font(.caption2).foregroundStyle(Theme.accent) }
-            }
-            Text(info?.model ?? "…").font(.system(size: 11, weight: .medium)).foregroundStyle(info?.ready == true ? Theme.textPrimary : (info?.unavailable == true ? Theme.textSecondary : Theme.attention)).lineLimit(1)
-            Text([info?.provider, info?.mode].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")).font(.system(size: 9.5)).foregroundStyle(Theme.textSecondary).lineLimit(1)
-        }
-        .padding(8).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Theme.surface, in: RoundedRectangle(cornerRadius: 12))
-        .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(selected ? Theme.accent : (isDefault ? Theme.accent.opacity(0.5) : Theme.border), lineWidth: selected ? 2 : 1))
-        .shadow(color: .black.opacity(0.06), radius: 3, y: 1)
     }
 }
 
@@ -290,15 +204,30 @@ struct ModelPicker: View {
 
 private struct TaskInspector: View {
     @ObservedObject var cfg: AIConfig
+    let state: WorkflowState
     let task: WorkflowTask
-    let onReset: () -> Void
     @State private var route: TaskRoute
     @State private var confirmReset = false
 
-    init(cfg: AIConfig, task: WorkflowTask, onReset: @escaping () -> Void) {
-        self.cfg = cfg; self.task = task; self.onReset = onReset; _route = State(initialValue: cfg.route(task))
+    init(cfg: AIConfig, state: WorkflowState, task: WorkflowTask) {
+        self.cfg = cfg; self.state = state; self.task = task; _route = State(initialValue: cfg.route(task))
     }
     private func commit() { cfg.save(route) }
+
+    /// Plain-language reading of this node's lines on the canvas.
+    private var connections: some View {
+        let res = cfg.resolution(task)
+        let feeds = WorkflowTask.all.filter { $0.dependsOn.contains(task.id) }
+        return VStack(alignment: .leading, spacing: 4) {
+            Text("Connections").font(Theme.cardTitle)
+            if task.capability == .llm {
+                Label(route.manualBridge ? "Not connected to the default: uses the manual ChatGPT Bridge." : (res.inherited ? "Purple line: follows the Default Model." : "No purple line: this task has its own model setting."), systemImage: "line.diagonal").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+            } else { Label("Uses the \(task.capability.label) default, not the LLM default.", systemImage: "line.diagonal").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if !task.dependsOn.isEmpty { Label("Dashed line: needs output of \(task.dependsOn.compactMap { WorkflowTask.find($0)?.title }.joined(separator: ", ")).", systemImage: "arrow.down.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if !feeds.isEmpty { Label("Dashed line: feeds \(feeds.map(\.title).joined(separator: ", ")).", systemImage: "arrow.up.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if task.dependsOn.isEmpty && feeds.isEmpty { Text("No workflow dependencies.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+        }
+    }
 
     var body: some View {
         let res = cfg.resolution(task)
@@ -307,7 +236,7 @@ private struct TaskInspector: View {
             Label(task.title, systemImage: task.capability.symbol).font(Theme.sectionTitle)
             Text(task.summary).foregroundStyle(Theme.textSecondary)
             HStack { Badge(text: task.capability.label); if task.optional { Badge(text: "Optional stage", color: Theme.textSecondary) } }
-            if !task.dependsOn.isEmpty { Text("Uses output of: \(task.dependsOn.compactMap { WorkflowTask.find($0)?.title }.joined(separator: ", "))").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            connections
 
             if llm {
                 Toggle("Use the manual ChatGPT Bridge", isOn: Binding(get: { route.manualBridge }, set: { route.manualBridge = $0; commit() }))
@@ -354,7 +283,7 @@ private struct TaskInspector: View {
             }
         }
         .confirmationDialog("Reset \(task.title)?", isPresented: $confirmReset, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { cfg.reset(task.id); route = TaskRoute(task: task.id); onReset() }
+            Button("Reset", role: .destructive) { cfg.reset(task.id); route = TaskRoute(task: task.id) }
             Button("Cancel", role: .cancel) {}
         } message: { Text("Its own model, fallback, prompt and manual-bridge setting are removed; it follows the default again.") }
     }

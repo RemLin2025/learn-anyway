@@ -39,7 +39,8 @@ public struct QuestionRow: Sendable, Identifiable, Hashable {
     public var id: UUID { question.id }
 }
 
-public struct QuestionDetail: Sendable {
+public struct QuestionDetail: Sendable, Identifiable {
+    public var id: UUID { revision.id }
     public var question: Question
     public var revision: QuestionRevision
     public var spec: QuestionSpec

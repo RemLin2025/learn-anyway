@@ -134,7 +134,6 @@ struct TaskDetailView: View {
     }
 }
 
-extension AITaskBatch: @retroactive Identifiable {}
 
 // MARK: Request review / export
 

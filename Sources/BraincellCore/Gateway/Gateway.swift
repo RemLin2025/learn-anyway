@@ -50,6 +50,8 @@ public final class AIGateway: @unchecked Sendable {
     func setClock(sleep: @escaping @Sendable (TimeInterval) async -> Void, now: @escaping @Sendable () -> Date) { self.sleep = sleep; self.now = now }
 
     public func resolve(_ task: WorkflowTask) throws -> Resolution { try ModelRouter(store: store).resolve(task) }
+    /// Resolves every task from a single database read (used by the workflow canvas).
+    public func resolveAll() throws -> [String: Resolution] { try ModelRouter(store: store).resolveAll() }
 
     // MARK: Connections
 

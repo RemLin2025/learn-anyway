@@ -163,6 +163,8 @@ public struct GatewayStore: Sendable {
     public func layout() throws -> [String: LayoutPoint] { try db.read { Dictionary(uniqueKeysWithValues: try LayoutPoint.fetchAll($0).map { ($0.task, $0) }) } }
     public func save(_ p: LayoutPoint) throws { try db.write { try p.save($0) } }
     public func resetLayout() throws { try db.write { _ = try LayoutPoint.deleteAll($0) } }
+    /// Positions saved by the first workflow editor were absolute coordinates of a layout that no longer exists; drop them once.
+    public func pruneLegacyLayout() throws { try db.write { try $0.execute(sql: "DELETE FROM ai_workflow_layout WHERE task NOT LIKE 'o:%'") } }
 
     public func record(_ r: AIRequestRecord) throws { try db.write { try r.insert($0) } }
 }
