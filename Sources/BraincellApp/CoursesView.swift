@@ -11,12 +11,13 @@ struct CoursesView: View {
         HSplitView {
             List(selection: $model.selectedCourseID) {
                 ForEach(model.courseList) { c in
-                    Label(c.name, systemImage: c.kind == .quickCram ? "bolt" : "graduationcap").tag(c.id)
+                    ListRowLabel(title: c.name, symbol: c.kind == .quickCram ? "bolt.fill" : "graduationcap.fill", tint: c.kind == .quickCram ? Theme.attention : Theme.accent).tag(c.id)
                         .contextMenu { Button("Archive") { model.perform { try model.courses?.archiveCourse(c.id) } } }
                 }
             }
+            .sidePanel()
             .frame(minWidth: 190, idealWidth: 220, maxWidth: 300)
-            .overlay { if model.courseList.isEmpty { Text("No courses yet").foregroundStyle(.secondary) } }
+            .overlay { if model.courseList.isEmpty { Text("No courses yet").foregroundStyle(Theme.textSecondary) } }
 
             Group {
                 if let id = model.selectedCourseID, let course = model.courseList.first(where: { $0.id == id }) {
@@ -47,12 +48,12 @@ struct NameSheet: View {
     let confirm: String
     let action: () -> Void
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text(title).font(.headline)
-            TextField(prompt, text: $text).onSubmit(go).frame(width: 300).accessibilityLabel(prompt)
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            Text(title).font(Theme.sectionTitle)
+            TextField(prompt, text: $text).onSubmit(go).accessibilityLabel(prompt)
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(confirm, action: go).keyboardShortcut(.defaultAction).disabled(text.trimmed.isEmpty) }
-        }.padding(20)
+                Button(confirm, action: go).buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(text.trimmed.isEmpty) }
+        }.dialogSurface(width: 380)
     }
     private func go() { guard !text.trimmed.isEmpty else { return }; action(); dismiss() }
 }
@@ -70,7 +71,7 @@ struct CourseDetailView: View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(course.name).font(.title.weight(.semibold))
+                    Text(course.name).font(Theme.pageTitle)
                     if course.kind == .quickCram { Badge(text: "Quick Cram", color: Theme.attention) }
                     if let x = try? model.progression?.courseXP(course.id), x.xp > 0 { Badge(text: "Level \(x.level) · \(x.xp) XP") }
                     Spacer()
@@ -78,11 +79,10 @@ struct CourseDetailView: View {
                         .buttonStyle(.primary)
                     if course.kind == .quickCram { Button("Convert to Course…") { convertName = course.name; showConvert = true } }
                 }
-                Picker("Section", selection: $tab) { ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
-                    .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 440)
+                SegmentedControl(selection: $tab, options: Tab.allCases) { $0.rawValue }
             }
             .padding([.horizontal, .top], 20).padding(.bottom, 12)
-            Divider()
+            .controlStrip()
             Group {
                 switch tab {
                 case .assessments: AssessmentsTab(course: course)
@@ -125,9 +125,9 @@ struct AssessmentsTab: View {
                     List(selection: $selected) {
                         ForEach(assessments) { a in
                             VStack(alignment: .leading, spacing: 3) {
-                                HStack { Text(a.name).font(.headline)
+                                HStack { Text(a.name).font(Theme.cardTitle)
                                     if a.isCumulative { Badge(text: "Cumulative", color: Theme.mastery) } }
-                                if let d = a.deadline { Text("Due \(d.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(.secondary) }
+                                if let d = a.deadline { Text("Due \(d.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(Theme.textSecondary) }
                             }.tag(a.id)
                             .contextMenu {
                                 Button("Edit…") { editing = a }
@@ -135,10 +135,10 @@ struct AssessmentsTab: View {
                             }
                         }
                     }
-                    Button { adding = true } label: { Label("Add Assessment", systemImage: "plus") }.padding(8)
+                    Button { adding = true } label: { Label("Add Assessment", systemImage: "plus") }.padding(Theme.Space.md)
                 }
             }
-            .frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+            .sidePanel().frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
 
             Group {
                 if let a = assessments.first(where: { $0.id == selected }) { scopeEditor(a) }
@@ -159,9 +159,9 @@ struct AssessmentsTab: View {
                 Button { model.practiceCourse(course, assessment: a) } label: { Label("Practice \(a.name)", systemImage: "play.fill") }
             }
             if a.isCumulative {
-                Text("Cumulative: covers every topic in this course, including ones you add later.").font(.callout).foregroundStyle(.secondary)
+                Text("Cumulative: covers every topic in this course, including ones you add later.").font(.callout).foregroundStyle(Theme.textSecondary)
             } else if skills.isEmpty {
-                Text("Add topics in the Topics tab first.").foregroundStyle(.secondary)
+                Text("Add topics in the Topics tab first.").foregroundStyle(Theme.textSecondary)
             }
             List(skills) { s in
                 Toggle(s.name, isOn: Binding(
@@ -170,8 +170,9 @@ struct AssessmentsTab: View {
                         if on { try model.courses?.addToScope(assessmentId: a.id, skillId: s.id) }
                         else { try model.courses?.removeFromScope(assessmentId: a.id, skillId: s.id) } } }))
                 .disabled(a.isCumulative)
-            }
-        }.padding(16)
+            }.scrollContentBackground(.hidden).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+                .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.border))
+        }.padding(Theme.Space.lg)
     }
 
     private func load() {
@@ -203,9 +204,9 @@ struct AssessmentSheet: View {
             if hasDeadline { DatePicker("Deadline", selection: $deadline) }
             Toggle("Cumulative (covers the whole course)", isOn: $cumulative)
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button(existing == nil ? "Add" : "Save", action: save).keyboardShortcut(.defaultAction).disabled(name.trimmed.isEmpty) }
+                Button(existing == nil ? "Add" : "Save", action: save).buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(name.trimmed.isEmpty) }
         }
-        .formStyle(.grouped).frame(width: 420).padding(.vertical, 8)
+        .formStyle(.grouped).scrollContentBackground(.hidden).frame(width: 440).padding(.vertical, Theme.Space.sm).background(Theme.background)
         .onAppear {
             guard let e = existing else { return }
             name = e.name; kind = e.kind; hasDeadline = e.deadline != nil; deadline = e.deadline ?? Date(); cumulative = e.isCumulative
@@ -258,7 +259,7 @@ struct TopicsTab: View {
                         Spacer()
                         let prereqs = prerequisiteNames(for: r.skill)
                         if !prereqs.isEmpty { Badge(text: "needs " + prereqs.joined(separator: ", "), color: Theme.attention) }
-                        Badge(text: "Not assessed", color: .secondary)
+                        Badge(text: "Not assessed", color: Theme.textSecondary)
                     }
                     .contextMenu {
                         Button("Rename…") { renaming = r.skill; renameText = r.skill.name }
@@ -269,7 +270,7 @@ struct TopicsTab: View {
                         }
                         Button("Archive", role: .destructive) { model.perform { try model.courses?.archiveSkill(r.skill.id) } }
                     }
-                }
+                }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.surface)
             }
         }
         .task(id: model.revision) { load() }
@@ -319,18 +320,18 @@ struct MaterialsTab: View {
                 Button { picking = true } label: { Label("Import Files…", systemImage: "square.and.arrow.down") }
                 Button { pasting = true } label: { Label("Paste Notes…", systemImage: "doc.on.clipboard") }
                 Spacer()
-                Text("PDF, text and Markdown. Scanned PDFs are flagged; OCR isn’t available yet.").font(.caption).foregroundStyle(.secondary)
+                Text("PDF, text and Markdown. Scanned PDFs are flagged; OCR isn’t available yet.").font(.caption).foregroundStyle(Theme.textSecondary)
             }.padding(16)
             if docs.isEmpty {
                 EmptyStateView(symbol: "doc.badge.plus", title: "No materials",
-                               message: "Drop PDFs or text files here, or paste notes. Originals are copied into Braincell’s managed storage.")
+                               message: "Drop PDFs or text files here, or paste notes. Originals are copied into Learn Anyway’s managed storage.")
             } else {
                 List(docs) { d in
                     HStack(alignment: .top) {
                         Image(systemName: d.kind == .pdf ? "doc.richtext" : "doc.text").foregroundStyle(Theme.accent)
                         VStack(alignment: .leading, spacing: 2) {
                             Text(d.title).font(.headline)
-                            Text(detail(d)).font(.caption).foregroundStyle(.secondary)
+                            Text(detail(d)).font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         Spacer()
                         switch d.extractionStatus {
@@ -339,22 +340,22 @@ struct MaterialsTab: View {
                         case .failed: Badge(text: "No text found", color: Theme.attention)
                         }
                     }.accessibilityElement(children: .combine)
-                }
+                }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.surface)
             }
         }
-        .overlay { if targeted { RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).padding(6) } }
+        .overlay { if targeted { RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).background(Theme.accent.opacity(0.06)).padding(6).allowsHitTesting(false) } }
         .dropDestination(for: URL.self, action: { urls, _ in model.importFiles(urls, courseId: course.id); return true }, isTargeted: { targeted = $0 })
         .fileImporter(isPresented: $picking, allowedContentTypes: Self.types, allowsMultipleSelection: true) { result in
             if case .success(let urls) = result { model.importFiles(urls, courseId: course.id) }
         }
         .sheet(isPresented: $pasting) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Paste Notes").font(.headline)
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
+                Text("Paste Notes").font(Theme.sectionTitle)
                 TextField("Title (optional)", text: $pasteTitle).accessibilityLabel("Title for pasted notes")
-                TextEditor(text: $pasteText).font(.body).frame(minHeight: 220).border(Color.secondary.opacity(0.3))
+                TextEditor(text: $pasteText).font(.body).frame(minHeight: 220).fieldSurface()
                 HStack { Spacer(); Button("Cancel") { pasting = false }.keyboardShortcut(.cancelAction)
-                    Button("Import") { importPasted() }.keyboardShortcut(.defaultAction).disabled(pasteText.trimmed.isEmpty) }
-            }.padding(20).frame(width: 520)
+                    Button("Import") { importPasted() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(pasteText.trimmed.isEmpty) }
+            }.dialogSurface(width: 520)
         }
         .task(id: model.revision) { docs = (try? model.documents?.documents(courseId: course.id)) ?? [] }
     }

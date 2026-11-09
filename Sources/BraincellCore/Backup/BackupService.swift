@@ -28,15 +28,15 @@ public enum BackupError: Error, LocalizedError, Equatable {
 
     public var errorDescription: String? {
         switch self {
-        case .notABackup: "That folder isn’t a Braincell backup (no readable manifest)."
+        case .notABackup: "That folder isn’t a Learn Anyway backup (no readable manifest)."
         case .unsupportedFormat(let f): "This backup uses format \(f), which this version can’t read."
-        case .newerThanApp: "This backup was made by a newer version of Braincell. Update the app to restore it."
+        case .newerThanApp: "This backup was made by a newer version of Learn Anyway. Update the app to restore it."
         case .unsafePath(let p): "The backup lists an unsafe file path (“\(p)”) and was rejected."
         case .missingFile(let p): "The backup is incomplete: “\(p)” is missing."
         case .hashMismatch(let p): "“\(p)” doesn’t match its recorded checksum; the backup is damaged or was modified."
         case .corruptDatabase(let m): "The backup’s database is damaged (\(m))."
         case .tooLarge: "The backup manifest is unreasonably large."
-        case .safetyBackupFailed: "Braincell couldn’t save a safety copy of your current data, so nothing was changed."
+        case .safetyBackupFailed: "Learn Anyway couldn’t save a safety copy of your current data, so nothing was changed."
         }
     }
 }
@@ -44,7 +44,7 @@ public enum BackupError: Error, LocalizedError, Equatable {
 public struct BackupResult: Sendable { public var url: URL; public var manifest: BackupManifest }
 
 /// Portable backup/restore. A backup is a folder (`.braincellbackup`) holding a consistent SQLite copy, every imported
-/// original, and a manifest with SHA-256 checksums. No secrets are stored in Braincell, so none can be exported.
+/// original, and a manifest with SHA-256 checksums. No secrets are stored in Learn Anyway, so none can be exported.
 /// Restore validates everything first, saves a safety backup of the current data, stages files, then replaces the
 /// database in a single SQLite backup operation.
 public struct BackupService: Sendable {

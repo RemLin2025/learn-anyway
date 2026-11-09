@@ -17,7 +17,7 @@ struct BlockView: View {
             RichText(text: block.text ?? "")
         case .code:
             VStack(alignment: .leading, spacing: 4) {
-                if let l = block.language { Text(l.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(.secondary) }
+                if let l = block.language { Text(l.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(Theme.textSecondary) }
                 Text(block.text ?? "").font(.system(.body, design: .monospaced)).textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
@@ -34,7 +34,7 @@ struct BlockView: View {
                 }
             }
         case .image:
-            Label(block.description ?? "Image", systemImage: "photo").foregroundStyle(.secondary)
+            Label(block.description ?? "Image", systemImage: "photo").foregroundStyle(Theme.textSecondary)
                 .accessibilityLabel("Image: \(block.description ?? "")")
         }
     }
@@ -64,11 +64,11 @@ struct QuestionPreview: View {
                 Text(spec.title).font(.title2.weight(.semibold))
                 HStack(spacing: 6) {
                     Badge(text: spec.type.label)
-                    Badge(text: "Difficulty \(spec.difficulty)/5", color: .secondary)
+                    Badge(text: "Difficulty \(spec.difficulty)/5", color: Theme.textSecondary)
                     Badge(text: q.readiness.label, color: q.readiness.color)
                     if q.verificationSource == .user { Badge(text: "Verified by you", color: Theme.mastery) }
                 }
-                Text(spec.learningObjective).foregroundStyle(.secondary)
+                Text(spec.learningObjective).foregroundStyle(Theme.textSecondary)
 
                 if !q.notes.isEmpty {
                     Card {
@@ -89,7 +89,7 @@ struct QuestionPreview: View {
                 }
                 if q.readiness == .unverified {
                     Text("Unverified: the answer hasn’t been independently confirmed, so it isn’t used for trusted automatic grading.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
                 }
 
                 BlocksView(blocks: spec.content)
@@ -110,7 +110,7 @@ struct QuestionPreview: View {
                 }
                 if !spec.sources.isEmpty {
                     Text("Sources: " + spec.sources.map { [$0.document, $0.page.map { "p.\($0)" }].compactMap { $0 }.joined(separator: " ") }.joined(separator: "; "))
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
                 }
                 Divider()
                 LabeledContent("Skills") { Text(detail.skills.isEmpty ? "None" : detail.skills.map(\.name).joined(separator: ", ")) }
@@ -151,12 +151,12 @@ struct QuestionPreview: View {
         case .singleChoice, .multipleSelect:
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(spec.answer.choices ?? [], id: \.id) { c in
-                    Label(c.text, systemImage: spec.type == .singleChoice ? "circle" : "square").foregroundStyle(.secondary)
+                    Label(c.text, systemImage: spec.type == .singleChoice ? "circle" : "square").foregroundStyle(Theme.textSecondary)
                 }
             }
-        case .numeric: Label("Numeric answer\(spec.answer.unit.map { " (\($0))" } ?? "")", systemImage: "number").foregroundStyle(.secondary)
-        case .coding: Label("Code editor (\((spec.answer.language ?? "").capitalized)). Running tests isn’t available: Braincell doesn’t execute code yet.", systemImage: "chevron.left.forwardslash.chevron.right").foregroundStyle(.secondary)
-        case .longForm, .derivationProof: Label("Written response, graded by rubric or self-review", systemImage: "text.alignleft").foregroundStyle(.secondary)
+        case .numeric: Label("Numeric answer\(spec.answer.unit.map { " (\($0))" } ?? "")", systemImage: "number").foregroundStyle(Theme.textSecondary)
+        case .coding: Label("Code editor (\((spec.answer.language ?? "").capitalized)). Running tests isn’t available: Learn Anyway doesn’t execute code yet.", systemImage: "chevron.left.forwardslash.chevron.right").foregroundStyle(Theme.textSecondary)
+        case .longForm, .derivationProof: Label("Written response, graded by rubric or self-review", systemImage: "text.alignleft").foregroundStyle(Theme.textSecondary)
         default: EmptyView()
         }
     }
@@ -200,15 +200,15 @@ struct QuestionEditor: View {
         let spec = detail.spec
         VStack(alignment: .leading, spacing: 10) {
             Text("Edit question").font(.headline)
-            Text("Saving creates revision #\(detail.revision.number + 1). Earlier attempts stay linked to the revision they answered.").font(.caption).foregroundStyle(.secondary)
+            Text("Saving creates revision #\(detail.revision.number + 1). Earlier attempts stay linked to the revision they answered.").font(.caption).foregroundStyle(Theme.textSecondary)
             ScrollView {
                 Form {
                     TextField("Title", text: $title)
                     Stepper("Difficulty \(difficulty)", value: $difficulty, in: 1...5)
                     TextField("Learning objective", text: $objective)
-                    LabeledContent("Statement") { TextEditor(text: $statement).frame(height: 90).border(.quaternary) }
+                    LabeledContent("Statement") { TextEditor(text: $statement).frame(height: 90).fieldSurface() }
                     switch spec.type {
-                    case .flashcard: LabeledContent("Back") { TextEditor(text: $back).frame(height: 60).border(.quaternary) }
+                    case .flashcard: LabeledContent("Back") { TextEditor(text: $back).frame(height: 60).fieldSurface() }
                     case .singleChoice, .multipleSelect:
                         ForEach(choices.indices, id: \.self) { i in
                             HStack {
@@ -219,20 +219,20 @@ struct QuestionEditor: View {
                                 TextField("Choice \(choices[i].id)", text: $choices[i].text)
                             }
                         }
-                    case .shortAnswer, .codeTracing: LabeledContent("Accepted (one per line)") { TextEditor(text: $accepted).frame(height: 60).border(.quaternary) }
+                    case .shortAnswer, .codeTracing: LabeledContent("Accepted (one per line)") { TextEditor(text: $accepted).frame(height: 60).fieldSurface() }
                     case .numeric:
                         TextField("Value", text: $value); TextField("Tolerance", text: $tolerance)
                     default: EmptyView()
                     }
-                    LabeledContent("Solution") { TextEditor(text: $solution).frame(height: 70).border(.quaternary) }
-                    LabeledContent("Hints (one per line)") { TextEditor(text: $hints).frame(height: 60).border(.quaternary) }
+                    LabeledContent("Solution") { TextEditor(text: $solution).frame(height: 70).fieldSurface() }
+                    LabeledContent("Hints (one per line)") { TextEditor(text: $hints).frame(height: 60).fieldSurface() }
                 }.formStyle(.columns)
             }
             if let error { Text(error).foregroundStyle(.red).font(.callout) }
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Save Revision", action: save).keyboardShortcut(.defaultAction) }
         }
-        .padding(20).frame(width: 560, height: 560)
+        .padding(Theme.Space.xl).frame(width: 560, height: 560).background(Theme.background)
         .onAppear(perform: load)
     }
 

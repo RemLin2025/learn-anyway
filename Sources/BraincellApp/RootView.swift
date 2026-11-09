@@ -2,6 +2,7 @@ import SwiftUI
 
 struct RootView: View {
     @EnvironmentObject var model: AppModel
+    @Environment(\.openSettings) private var openSettings
 
     var body: some View {
         Group {
@@ -13,6 +14,7 @@ struct RootView: View {
         .textFieldStyle(AppFieldStyle())
         .tint(Theme.accent)
         .foregroundStyle(Theme.textPrimary)
+        .onChange(of: model.snapshotOpenSettings) { _, on in if on { openSettings() } }
     }
 
     private var library: some View {
@@ -29,6 +31,7 @@ struct RootView: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .scrollContentBackground(.hidden)
             .background(Theme.background)
             .toolbar { FocusToolbarButton() }
         }

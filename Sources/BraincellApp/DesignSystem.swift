@@ -221,6 +221,54 @@ struct AppFieldStyle: TextFieldStyle {
     }
 }
 
+/// Multi-line text areas (TextEditor) get the same rounded, bordered look as TextField.
+extension View {
+    func fieldSurface() -> some View {
+        scrollContentBackground(.hidden).padding(6)
+            .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
+    }
+    /// Sheet chrome: generous padding on the light page background. Apply to a sheet's root view.
+    func dialogSurface(width: CGFloat? = nil) -> some View {
+        padding(Theme.Space.xl).frame(width: width).background(Theme.background)
+    }
+}
+
+/// Search box with a leading magnifier and a clear button.
+struct SearchField: View {
+    let prompt: String
+    @Binding var text: String
+    var body: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Image(systemName: "magnifyingglass").foregroundStyle(Theme.textSecondary).accessibilityHidden(true)
+            TextField(prompt, text: $text).textFieldStyle(.plain).accessibilityLabel(prompt)
+            if !text.isEmpty {
+                Button { text = "" } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(Theme.textSecondary) }
+                    .buttonStyle(.plain).accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 10).padding(.vertical, 7)
+        .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
+    }
+}
+
+/// Icon + title + optional trailing detail used by list panes (courses, assessments, topics).
+struct ListRowLabel: View {
+    let title: String
+    var symbol: String?
+    var tint: Color = Theme.accent
+    var body: some View {
+        HStack(spacing: Theme.Space.md) {
+            if let symbol {
+                Image(systemName: symbol).font(.system(size: 13, weight: .semibold)).foregroundStyle(tint)
+                    .frame(width: 28, height: 28).background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 8)).accessibilityHidden(true)
+            }
+            Text(title).font(.system(.body, design: .rounded, weight: .medium)).lineLimit(2)
+        }.padding(.vertical, 2)
+    }
+}
+
 // MARK: Sidebar
 
 /// Dark navigation rail. Collapses to icons only. Navigation state lives in AppModel.selection, so the Go menu
@@ -234,10 +282,10 @@ struct SidebarView: View {
             HStack(spacing: Theme.Space.sm) {
                 Image(systemName: "brain.head.profile").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 32, height: 32).background(Theme.accent, in: RoundedRectangle(cornerRadius: 9)).accessibilityHidden(true)
-                if !collapsed { Text("Braincell").font(.system(.title3, design: .rounded, weight: .bold)).foregroundStyle(.white) }
+                if !collapsed { Text("Learn Anyway").font(.system(.title3, design: .rounded, weight: .bold)).foregroundStyle(.white) }
             }
             .padding(.bottom, Theme.Space.lg).padding(.top, Theme.Space.xs).padding(.leading, 2)
-            .accessibilityElement(children: .combine).accessibilityLabel("Braincell")
+            .accessibilityElement(children: .combine).accessibilityLabel("Learn Anyway")
 
             ForEach(SidebarItem.allCases) { item in
                 SidebarRow(title: item.rawValue, symbol: item.symbol, collapsed: collapsed, selected: (model.selection ?? .home) == item) { model.selection = item }
@@ -279,5 +327,42 @@ private struct SidebarRow: View {
         Button(action: action) { SidebarLabel(title: title, symbol: symbol, collapsed: collapsed, selected: selected, hover: hover) }
             .buttonStyle(.plain).onHover { hover = $0 }.motion(value: hover)
             .help(title).accessibilityLabel(title).accessibilityAddTraits(selected ? .isSelected : [])
+    }
+}
+
+// MARK: Panels and segmented control
+
+extension View {
+    /// Left-hand list pane: white surface, no native list background, hairline on the trailing edge.
+    func sidePanel() -> some View {
+        scrollContentBackground(.hidden).listStyle(.plain).background(Theme.surface)
+            .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
+    }
+    /// Toolbar strip above content (filters, pickers): surface background with a hairline below.
+    func controlStrip() -> some View {
+        background(Theme.surface).overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
+    }
+}
+
+/// Pill-style segmented control. Each option is a real button, so VoiceOver and keyboard focus behave normally.
+struct SegmentedControl<T: Hashable>: View {
+    @Binding var selection: T
+    let options: [T]
+    let label: (T) -> String
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(options, id: \.self) { o in
+                Button { selection = o } label: {
+                    Text(label(o)).font(.system(.callout, design: .rounded, weight: selection == o ? .semibold : .regular))
+                        .foregroundStyle(selection == o ? Theme.textPrimary : Theme.textSecondary)
+                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .background(selection == o ? Theme.surface : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.control - 3))
+                        .shadow(color: .black.opacity(selection == o ? 0.08 : 0), radius: 2, y: 1)
+                }
+                .buttonStyle(.plain).accessibilityAddTraits(selection == o ? .isSelected : [])
+            }
+        }
+        .padding(3).background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        .motion(value: selection).accessibilityElement(children: .contain)
     }
 }

@@ -43,10 +43,10 @@ public enum AITaskError: Error, LocalizedError, Equatable {
         case .responseTooLarge(let mb): "The response is larger than \(mb) MB. Ask for fewer questions per batch."
         case .malformedJSON(let d): "That isn’t valid JSON (\(d)). Copy ChatGPT’s whole reply, or ask it to “return only the JSON object”. Your text was kept."
         case .notAnObject: "The response must be a single JSON object."
-        case .unsupportedSchema(let v): "Unsupported schemaVersion \(v.map { "“\($0)”" } ?? "(missing)"). This version of Braincell reads “\(QuestionSchema.version)”."
+        case .unsupportedSchema(let v): "Unsupported schemaVersion \(v.map { "“\($0)”" } ?? "(missing)"). This version of Learn Anyway reads “\(QuestionSchema.version)”."
         case .missingRequestId: "The response has no requestId, so it can’t be matched to a request."
         case .requestMismatch(let e, let f): "This response answers a different request (\(f)); this batch expects \(e). Nothing was imported."
-        case .unknownRequest(let f): "No request of yours has ID \(f). It may belong to another Braincell library. Nothing was imported."
+        case .unknownRequest(let f): "No request of yours has ID \(f). It may belong to another Learn Anyway library. Nothing was imported."
         case .tooManyQuestions(let n): "The response contains \(n) questions; the limit is \(AITaskService.maxQuestionsPerResponse)."
         case .missingQuestions: "The response has no “questions” array."
         case .noTopics: "The response has no usable skills. Nothing was changed."
@@ -85,7 +85,7 @@ public enum TaskStatus: String, Sendable {
 }
 
 /// Plans AI requests, tracks their lifecycle, and validates/commits responses. It never calls a network service:
-/// the user moves text between Braincell and ChatGPT by hand.
+/// the user moves text between Learn Anyway and ChatGPT by hand.
 public struct AITaskService: Sendable {
     public static let maxResponseBytes = 2 * 1024 * 1024
     public static let maxQuestionsPerResponse = 50

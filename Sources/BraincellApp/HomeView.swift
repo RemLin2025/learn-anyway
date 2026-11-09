@@ -12,7 +12,7 @@ struct HomeView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: Theme.Space.xl) {
-                PageHeader(title: model.courseList.isEmpty ? "Welcome to Braincell" : "What to study next", subtitle: "Everything works offline. No account or API key needed.")
+                PageHeader(title: model.courseList.isEmpty ? "Welcome to Learn Anyway" : "What to study next", subtitle: "Everything works offline. No account or API key needed.")
 
                 resumeCard
                 adaptiveCards
@@ -127,7 +127,7 @@ struct HomeView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 4) {
                         Label("Continue your session", systemImage: "play.circle.fill").font(.headline).foregroundStyle(Theme.mastery)
-                        Text(s.title).foregroundStyle(.secondary)
+                        Text(s.title).foregroundStyle(Theme.textSecondary)
                     }
                     Spacer()
                     Button("Resume") { model.activeSessionID = s.id }.buttonStyle(.primary)
@@ -156,7 +156,7 @@ struct HomeView: View {
                             Image(systemName: s.done ? "checkmark.circle.fill" : "circle").foregroundStyle(s.done ? Theme.mastery : .secondary)
                             Text(s.title).foregroundStyle(.primary)
                             Spacer()
-                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(.secondary)
+                            Image(systemName: "chevron.right").font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                     }.buttonStyle(.plain).accessibilityElement(children: .combine).accessibilityHint(s.done ? "Done" : "Opens the screen for this step")
                 }

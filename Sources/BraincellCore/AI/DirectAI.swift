@@ -89,7 +89,7 @@ public enum DirectAIError: Error, LocalizedError, Equatable {
         case .http(429, _): "The API is rate limiting requests. Try again in a minute."
         case .http(let c, let m) where c >= 500: "The API had a problem (\(c)). Try again later. \(m)"
         case .http(let c, let m): "The API refused the request (\(c)): \(m)"
-        case .malformedResponse: "The API answered in a way Braincell couldn’t read. The request is unchanged; use the manual route instead."
+        case .malformedResponse: "The API answered in a way Learn Anyway couldn’t read. The request is unchanged; use the manual route instead."
         case .refused(let m): m
         case .keychain(let s): "The Keychain refused the operation (code \(s))."
         }

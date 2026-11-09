@@ -24,7 +24,7 @@ struct SkillMapView: View {
                 Button("Reset") { zoom = 1 }
                 Button(collapsed.isEmpty ? "Collapse all" : "Expand all") { collapsed = collapsed.isEmpty ? parents : [] }
                 Spacer()
-                Label("hierarchy", systemImage: "arrow.right").font(.caption).foregroundStyle(.secondary)
+                Label("hierarchy", systemImage: "arrow.right").font(.caption).foregroundStyle(Theme.textSecondary)
                 Label("prerequisite", systemImage: "arrow.right").font(.caption).foregroundStyle(Theme.attention)
             }.padding(8).buttonStyle(.borderless)
             Divider()
@@ -60,7 +60,7 @@ struct SkillMapView: View {
             Button { selected = n.id } label: {
                 VStack(alignment: .leading, spacing: 1) {
                     Text(n.name).font(.callout.weight(.medium)).lineLimit(1)
-                    Text(label).font(.caption2).foregroundStyle(.secondary)
+                    Text(label).font(.caption2).foregroundStyle(Theme.textSecondary)
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }
             .buttonStyle(.plain)

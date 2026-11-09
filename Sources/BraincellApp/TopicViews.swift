@@ -15,22 +15,22 @@ struct TopicTaskSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("New topic analysis").font(.headline)
             Text("ChatGPT proposes skills, hierarchy, prerequisites and assessment coverage. Nothing changes until you review and accept the proposal.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Theme.textSecondary)
             Form {
                 Picker("Course", selection: $courseId) {
                     Text("Choose…").tag(UUID?.none)
                     ForEach(model.courseList) { Text($0.name).tag(UUID?.some($0.id)) }
                 }
                 Section("Include text from documents (only checked ones are shared)") {
-                    if docs.isEmpty { Text("No documents imported for this course. The request will use only the course name, skills and assessments.").foregroundStyle(.secondary) }
+                    if docs.isEmpty { Text("No documents imported for this course. The request will use only the course name, skills and assessments.").foregroundStyle(Theme.textSecondary) }
                     ForEach(docs) { d in Toggle(d.title, isOn: Binding(get: { docIds.contains(d.id) }, set: { if $0 { docIds.insert(d.id) } else { docIds.remove(d.id) } })) }
                 }
                 TextField("Extra guidance (optional)", text: $notes)
-            }.formStyle(.grouped)
+            }.formStyle(.grouped).scrollContentBackground(.hidden)
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create Task", action: create).keyboardShortcut(.defaultAction).disabled(courseId == nil) }
         }
-        .padding(20).frame(width: 520, height: 520)
+        .padding(Theme.Space.xl).frame(width: 520, height: 520).background(Theme.background)
         .onAppear { courseId = model.selectedCourseID ?? model.courseList.first?.id; load() }
         .onChange(of: courseId) { _, _ in docIds = []; load() }
     }
@@ -82,7 +82,7 @@ struct TopicReviewView: View {
         let e = p.items.filter { if case .existing = $0.match { true } else { false } }.count
         let a = p.items.count - n - e
         return VStack(alignment: .leading, spacing: 8) {
-            Text("\(n) new · \(e) match existing skills · \(a) need your decision").font(.callout).foregroundStyle(.secondary)
+            Text("\(n) new · \(e) match existing skills · \(a) need your decision").font(.callout).foregroundStyle(Theme.textSecondary)
             if p.alreadyApplied { Label("This proposal was already applied. Applying again adds nothing that exists.", systemImage: "checkmark.circle").foregroundStyle(Theme.accent).font(.callout) }
             if !p.unknownAssessments.isEmpty { Label("Not in this course, ignored: " + p.unknownAssessments.joined(separator: ", "), systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(Theme.attention) }
             if !p.problems.isEmpty {
@@ -92,7 +92,7 @@ struct TopicReviewView: View {
             }
             List(p.items) { row($0) }.frame(minHeight: 280)
             HStack {
-                Text("Existing mastery, XP and answers are never changed.").font(.caption).foregroundStyle(.secondary)
+                Text("Existing mastery, XP and answers are never changed.").font(.caption).foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Button("Close", action: onClose).keyboardShortcut(.cancelAction)
                 Button("Apply \(acceptedCount(p)) Skill\(acceptedCount(p) == 1 ? "" : "s")") { apply() }.keyboardShortcut(.defaultAction)
@@ -108,14 +108,14 @@ struct TopicReviewView: View {
                 switch i.match {
                 case .new:
                     Toggle("", isOn: Binding(get: { choices[i.id] != .skip }, set: { choices[i.id] = $0 ? .accept : .skip })).labelsHidden().accessibilityLabel("Accept \(i.name)")
-                    TextField("Name", text: Binding(get: { names[i.id] ?? i.name }, set: { names[i.id] = $0 })).textFieldStyle(.roundedBorder)
+                    TextField("Name", text: Binding(get: { names[i.id] ?? i.name }, set: { names[i.id] = $0 })).textFieldStyle(AppFieldStyle())
                     Badge(text: "New", color: Theme.accent)
                 case .existing(let s):
                     Image(systemName: "checkmark.circle").foregroundStyle(Theme.mastery).accessibilityHidden(true)
                     Text(i.name); Spacer()
-                    Badge(text: "Already have “\(s.name)”", color: .secondary)
+                    Badge(text: "Already have “\(s.name)”", color: Theme.textSecondary)
                 case .ambiguous(let c):
-                    TextField("Name", text: Binding(get: { names[i.id] ?? i.name }, set: { names[i.id] = $0 })).textFieldStyle(.roundedBorder)
+                    TextField("Name", text: Binding(get: { names[i.id] ?? i.name }, set: { names[i.id] = $0 })).textFieldStyle(AppFieldStyle())
                     Picker("", selection: Binding(get: { choices[i.id] ?? .skip }, set: { choices[i.id] = $0 })) {
                         Text("Skip for now").tag(Choice.skip)
                         Text("Add as a new skill").tag(Choice.accept)
@@ -123,10 +123,10 @@ struct TopicReviewView: View {
                     }.labelsHidden().frame(width: 230).accessibilityLabel("Decision for \(i.name)")
                 }
             }
-            if !i.summary.isEmpty { Text(i.summary).font(.caption).foregroundStyle(.secondary) }
+            if !i.summary.isEmpty { Text(i.summary).font(.caption).foregroundStyle(Theme.textSecondary) }
             let links = [i.parentRef.map { "Under: \(label($0))" }, i.prerequisiteRefs.isEmpty ? nil : "Needs first: " + i.prerequisiteRefs.map(label).joined(separator: ", "),
                          i.assessments.isEmpty ? nil : "Covered by: " + i.assessments.joined(separator: ", ")].compactMap { $0 }
-            if !links.isEmpty { Text(links.joined(separator: "  ·  ")).font(.caption).foregroundStyle(.secondary) }
+            if !links.isEmpty { Text(links.joined(separator: "  ·  ")).font(.caption).foregroundStyle(Theme.textSecondary) }
         }.padding(.vertical, 2).accessibilityElement(children: .contain)
     }
 

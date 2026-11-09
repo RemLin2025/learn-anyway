@@ -73,7 +73,7 @@ extension AITaskService {
             body += "\n### Student response\n\(describe(a.decodedResponse, spec: spec))\n"
         }
         let instructions = """
-        # Braincell grading request — \(course.name)
+        # Learn Anyway grading request — \(course.name)
 
         You are grading a student's answers. Be fair, specific and consistent with the rubric. Grade ONLY the attempts listed in attempts.md.
 
@@ -97,7 +97,7 @@ extension AITaskService {
         let files = [ExportFile(name: "instructions.md", content: instructions), ExportFile(name: "response_schema.json", content: GradeSchema.json),
                      ExportFile(name: "attempts.md", content: body),
                      ExportFile(name: "manifest.json", content: (try? enc.encode(manifest)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")]
-        let cover = "I'm attaching files for a Braincell grading request. Read instructions.md and follow it exactly. Reply with ONLY the JSON object described in response_schema.json. The requestId to echo back is: \(b.requestId)"
+        let cover = "I'm attaching files for a Learn Anyway grading request. Read instructions.md and follow it exactly. Reply with ONLY the JSON object described in response_schema.json. The requestId to echo back is: \(b.requestId)"
         b.requestText = single
         b.manifest = String(data: try JSONEncoder().encode(manifest), encoding: .utf8) ?? "{}"
         try b.update(d)

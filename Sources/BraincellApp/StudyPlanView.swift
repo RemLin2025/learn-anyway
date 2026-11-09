@@ -22,7 +22,7 @@ struct StudyPlanTab: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if dueCount == 0 {
-                    Label("No reviews due. You’re all caught up on flashcards and short answers.", systemImage: "checkmark.circle").font(.callout).foregroundStyle(.secondary)
+                    Label("No reviews due. You’re all caught up on flashcards and short answers.", systemImage: "checkmark.circle").font(.callout).foregroundStyle(Theme.textSecondary)
                 }
                 if dueCount > 0 {
                     Card {
@@ -43,15 +43,15 @@ struct StudyPlanTab: View {
                                 Text("Choose…").tag(UUID?.none)
                                 ForEach(assessments) { Text($0.name).tag(UUID?.some($0.id)) }
                             }.frame(maxWidth: 360)
-                            if assessments.isEmpty { Text("Add an assessment first (Assessments tab).").font(.caption).foregroundStyle(.secondary) }
+                            if assessments.isEmpty { Text("Add an assessment first (Assessments tab).").font(.caption).foregroundStyle(Theme.textSecondary) }
                         } else {
-                            Text("Favours due reviews, weak skills and skills you haven’t touched lately.").font(.caption).foregroundStyle(.secondary)
+                            Text("Favours due reviews, weak skills and skills you haven’t touched lately.").font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         Picker("Time", selection: $minutes) { ForEach([10, 15, 25, 45, 60, 90], id: \.self) { Text("\($0) min").tag($0) } }.frame(maxWidth: 200)
                         DisclosureGroup("Constraints", isExpanded: $showConstraints) {
                             VStack(alignment: .leading, spacing: 6) {
                                 Picker("Highest difficulty", selection: $maxDifficulty) { ForEach(1...5, id: \.self) { Text("\($0)").tag($0) } }.frame(maxWidth: 220)
-                                Text("Only these topics (none checked = all in scope)").font(.caption).foregroundStyle(.secondary)
+                                Text("Only these topics (none checked = all in scope)").font(.caption).foregroundStyle(Theme.textSecondary)
                                 ForEach(skills) { s in
                                     Toggle(s.name, isOn: Binding(get: { focus.contains(s.id) }, set: { if $0 { focus.insert(s.id) } else { focus.remove(s.id) } }))
                                 }
@@ -65,7 +65,7 @@ struct StudyPlanTab: View {
                 }
                 if let plan { planView(plan) }
                 else {
-                    EmptyStateView(symbol: "list.bullet.clipboard", title: "Build a plan", message: "Braincell picks questions from your own evidence. It works offline and explains every suggestion.")
+                    EmptyStateView(symbol: "list.bullet.clipboard", title: "Build a plan", message: "Learn Anyway picks questions from your own evidence. It works offline and explains every suggestion.")
                         .frame(height: 220)
                 }
             }.padding(20)
@@ -85,7 +85,7 @@ struct StudyPlanTab: View {
         } else {
             let chosen = plan.items.filter { included.contains($0.id) }
             HStack {
-                Text("\(chosen.count) of \(plan.items.count) selected · about \(Int(chosen.reduce(0) { $0 + $1.estimatedMinutes }.rounded())) min").foregroundStyle(.secondary)
+                Text("\(chosen.count) of \(plan.items.count) selected · about \(Int(chosen.reduce(0) { $0 + $1.estimatedMinutes }.rounded())) min").foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Button("Start session") {
                     model.startPlan(chosen, title: plan.assessmentName.map { "\(course.name) · \($0)" } ?? "\(course.name) · \(plan.mode == .cram ? "Cram" : "Mastery")",
@@ -101,11 +101,11 @@ struct StudyPlanTab: View {
                             HStack(spacing: 6) {
                                 Text(item.title).font(.headline).lineLimit(1)
                                 Badge(text: kindLabel(item.kind), color: kindColor(item.kind))
-                                Badge(text: item.type.label, color: .secondary)
+                                Badge(text: item.type.label, color: Theme.textSecondary)
                                 Spacer()
-                                Text("~\(Int(max(1, item.estimatedMinutes.rounded()))) min").font(.caption).foregroundStyle(.secondary)
+                                Text("~\(Int(max(1, item.estimatedMinutes.rounded()))) min").font(.caption).foregroundStyle(Theme.textSecondary)
                             }
-                            Text(item.reason).font(.callout).foregroundStyle(.secondary)
+                            Text(item.reason).font(.callout).foregroundStyle(Theme.textSecondary)
                         }
                     }
                 }.opacity(included.contains(item.id) ? 1 : 0.5)

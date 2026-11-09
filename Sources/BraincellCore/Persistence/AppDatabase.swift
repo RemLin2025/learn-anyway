@@ -464,6 +464,75 @@ public final class AppDatabase: Sendable {
             try db.create(index: "attempts_on_submittedAt", on: "attempts", columns: ["submittedAt"])
             try db.create(index: "evaluations_on_state_active", on: "evaluations", columns: ["state"], condition: Column("supersededAt") == nil)
         }
+        m.registerMigration("v11_ai_gateway") { db in
+            try db.create(table: "ai_connections") { t in
+                t.column("id", .blob).primaryKey()
+                t.column("providerId", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("baseURL", .text)
+                t.column("enabled", .boolean).notNull().defaults(to: true)
+                t.column("status", .text).notNull().defaults(to: "configured")
+                t.column("lastCheckedAt", .datetime)
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(table: "ai_models") { t in
+                t.column("id", .blob).primaryKey()
+                t.column("connectionId", .blob).notNull().references("ai_connections", onDelete: .cascade)
+                t.column("modelId", .text).notNull()
+                t.column("displayName", .text).notNull()
+                t.column("capability", .text).notNull()
+                t.column("source", .text).notNull()            // discovered | manual
+                t.column("inputPricePerM", .double)            // USD per million tokens; nil = unknown
+                t.column("outputPricePerM", .double)
+                t.column("health", .text).notNull().defaults(to: "untested")   // untested | ready | failed
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["connectionId", "modelId", "capability"])
+            }
+            try db.create(table: "ai_capability_defaults") { t in
+                t.column("capability", .text).primaryKey()
+                t.column("connectionId", .blob).notNull().references("ai_connections", onDelete: .cascade)
+                t.column("modelId", .text).notNull()
+            }
+            try db.create(table: "ai_task_routes") { t in
+                t.column("task", .text).primaryKey()
+                t.column("inherit", .boolean).notNull().defaults(to: true)
+                t.column("connectionId", .blob).references("ai_connections", onDelete: .setNull)
+                t.column("modelId", .text)
+                t.column("fallbackConnectionId", .blob).references("ai_connections", onDelete: .setNull)
+                t.column("fallbackModelId", .text)
+                t.column("maxRetries", .integer).notNull().defaults(to: 1)
+                t.column("manualBridge", .boolean).notNull().defaults(to: false)
+                t.column("instruction", .text)
+                t.column("temperature", .double)
+                t.column("maxTokens", .integer)
+                t.column("timeoutSeconds", .integer).notNull().defaults(to: 120)
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "ai_requests") { t in
+                t.column("id", .blob).primaryKey()
+                t.column("ts", .datetime).notNull()
+                t.column("connectionId", .blob)                // no FK: history survives removing a provider
+                t.column("providerId", .text).notNull()
+                t.column("modelId", .text).notNull()
+                t.column("capability", .text).notNull()
+                t.column("task", .text).notNull()
+                t.column("courseId", .blob)
+                t.column("status", .text).notNull()            // success | failed | blocked
+                t.column("latencyMs", .integer).notNull()
+                t.column("inputTokens", .integer)
+                t.column("outputTokens", .integer)
+                t.column("cachedTokens", .integer)
+                t.column("costMicros", .integer)               // USD millionths; nil = unknown
+                t.column("costBasis", .text).notNull()         // estimated | local | unknown
+                t.column("errorCategory", .text)
+            }
+            try db.create(index: "ai_requests_on_ts", on: "ai_requests", columns: ["ts"])
+            try db.create(table: "ai_workflow_layout") { t in
+                t.column("task", .text).primaryKey()
+                t.column("x", .double).notNull()
+                t.column("y", .double).notNull()
+            }
+        }
         return m
     }
 

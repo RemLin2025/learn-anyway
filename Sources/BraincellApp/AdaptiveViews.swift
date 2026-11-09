@@ -8,7 +8,7 @@ struct ConfidenceRow: View {
     var body: some View {
         if pm.askConfidence, !pm.locked {
             HStack(spacing: 8) {
-                Text("How sure are you? (optional)").font(.caption).foregroundStyle(.secondary)
+                Text("How sure are you? (optional)").font(.caption).foregroundStyle(Theme.textSecondary)
                 ForEach(1...3, id: \.self) { level in
                     Button(LearningHistoryService.confidenceLabel(level)) { pm.confidence = pm.confidence == level ? nil : level }
                         .buttonStyle(.bordered).controlSize(.small).tint(pm.confidence == level ? Theme.accent : nil)
@@ -37,7 +37,7 @@ struct CoachBanner: View {
                     }
                     if s.offersReflection, !saved {
                         HStack {
-                            TextField("A note to yourself (optional)", text: $note).textFieldStyle(.roundedBorder)
+                            TextField("A note to yourself (optional)", text: $note).textFieldStyle(AppFieldStyle())
                             Button("Save note") { pm.addReflection(note); saved = true }.disabled(note.trimmed.isEmpty)
                         }
                     } else if saved { Label("Saved to your learning history", systemImage: "checkmark").font(.caption).foregroundStyle(Theme.mastery) }
@@ -72,18 +72,18 @@ struct StuckSheet: View {
                     ForEach(g.prerequisites, id: \.skill.id) { p in
                         HStack {
                             Text(p.skill.name)
-                            Badge(text: p.mastery.isUnknown ? "Not assessed" : "≈ \(Int(((p.mastery.overall ?? 0) * 100).rounded()))%", color: .secondary)
+                            Badge(text: p.mastery.isUnknown ? "Not assessed" : "≈ \(Int(((p.mastery.overall ?? 0) * 100).rounded()))%", color: Theme.textSecondary)
                             Spacer()
                             Button("Practise it") { practice(p.skill) }
                         }
                     }
                 }
                 Divider()
-                Text("Still stuck? You can copy a help request to paste into ChatGPT yourself. You’ll see exactly what it contains first.").font(.caption).foregroundStyle(.secondary)
+                Text("Still stuck? You can copy a help request to paste into ChatGPT yourself. You’ll see exactly what it contains first.").font(.caption).foregroundStyle(Theme.textSecondary)
                 HStack { Button("Prepare a help request…") { tutor = true }; Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }
             } else { ProgressView() }
         }
-        .padding(20).frame(width: 460)
+        .padding(Theme.Space.xl).frame(width: 460).background(Theme.background)
         .onAppear(perform: refresh)
         .sheet(isPresented: $tutor) { TutorSheet(pm: pm, kind: kind) }
     }
@@ -112,14 +112,14 @@ struct TutorSheet: View {
             if let built {
                 Card { VStack(alignment: .leading, spacing: 3) { Text("This will be shared").font(.subheadline.weight(.semibold)); ForEach(built.disclosure, id: \.self) { Text("• " + $0).font(.callout) } } }
                 Toggle("Include my attempt so far", isOn: $includeAttempt)
-                TextEditor(text: .constant(built.text)).font(.system(.caption, design: .monospaced)).frame(minHeight: 180).border(.quaternary)
-                if copied { Text("Copied. Paste it into ChatGPT yourself; Braincell doesn’t open it for you.").foregroundStyle(Theme.mastery) }
+                TextEditor(text: .constant(built.text)).font(.system(.caption, design: .monospaced)).frame(minHeight: 180).fieldSurface()
+                if copied { Text("Copied. Paste it into ChatGPT yourself; Learn Anyway doesn’t open it for you.").foregroundStyle(Theme.mastery) }
                 HStack {
                     Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
                     Button("Copy to Clipboard") { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(built.text, forType: .string); copied = true }.keyboardShortcut(.defaultAction)
                 }
-                Text("This is a one-off tutoring chat, so there is nothing to import back.").font(.caption).foregroundStyle(.secondary)
+                Text("This is a one-off tutoring chat, so there is nothing to import back.").font(.caption).foregroundStyle(Theme.textSecondary)
             }
-        }.padding(20).frame(width: 560, height: 520)
+        }.padding(Theme.Space.xl).frame(width: 560, height: 520).background(Theme.background)
     }
 }

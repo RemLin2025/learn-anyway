@@ -24,6 +24,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_SETTINGS_SNAP"] != nil { await settingsScenario(model, dir: dir); NSApp.terminate(nil); return }
         func shot(_ name: String) async {
             NSLog("snapshot: shot %@", name)
             try? await Task.sleep(nanoseconds: 1_500_000_000)
@@ -52,6 +53,37 @@ enum SnapshotRunner {
         await adaptiveScenario(model, shot: shot)
         await releaseScenario(model, dir: dir, shot: shot)
         NSApp.terminate(nil)
+    }
+
+    /// Screenshots of the four AI settings pages with synthetic data (never real keys). Only with BRAINCELL_SETTINGS_SNAP, and only against BRAINCELL_DATA_DIR.
+    static func settingsScenario(_ model: AppModel, dir: URL) async {
+        guard let gw = model.gateway, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        let c = AIConnection(providerId: "openrouter", name: "OpenRouter", status: .ready, lastCheckedAt: Date())
+        try? gw.store.save(c)
+        for (i, n) in ["openai/gpt-4o-mini", "anthropic/claude-sonnet", "deepseek/deepseek-chat"].enumerated() {
+            try? gw.store.save(AIModelRecord(connectionId: c.id, modelId: n, displayName: n, capability: .llm, source: "discovered", inputPricePerM: Double(i + 1) * 0.5, outputPricePerM: Double(i + 1) * 2, health: i == 0 ? .ready : .untested))
+        }
+        try? gw.store.setDefault(.llm, connection: c.id, model: "openai/gpt-4o-mini")
+        var r = TaskRoute(task: "answerEvaluation"); r.inherit = false; r.connectionId = c.id; r.modelId = "anthropic/claude-sonnet"; try? gw.store.save(r)
+        var m = TaskRoute(task: "tutoring"); m.manualBridge = true; try? gw.store.save(m)
+        for d in 0..<20 { for k in 0..<(1 + d % 4) {
+            let t = Calendar.current.date(byAdding: .hour, value: -(d * 24 + k), to: Date())!
+            try? gw.store.record(AIRequestRecord(id: UUID(), ts: t, connectionId: c.id, providerId: "openrouter", modelId: k % 2 == 0 ? "openai/gpt-4o-mini" : "deepseek/deepseek-chat", capability: .llm, task: k % 2 == 0 ? "quizGeneration" : "answerEvaluation", courseId: nil,
+                status: d == 3 && k == 0 ? "failed" : "success", latencyMs: 900 + d * 40, inputTokens: 1800 + d * 90, outputTokens: 600 + k * 120, cachedTokens: nil, costMicros: k % 2 == 0 ? Int64(2400 + d * 100) : nil, costBasis: k % 2 == 0 ? "estimated" : "unknown", errorCategory: d == 3 && k == 0 ? "rate_limit" : nil))
+        } }
+        model.aiConfig?.reload()
+        model.snapshotOpenSettings = true
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        guard let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.identifier?.rawValue.contains("Settings") == true || $0.title.contains("General")) }) else { NSLog("snapshot: no settings window"); return }
+        w.setContentSize(NSSize(width: 1180, height: 780))
+        for (i, s) in SettingsSection.allCases.enumerated() {
+            UserDefaults.standard.set(s.rawValue, forKey: "settingsSection")
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            if i == 3 { try? await Task.sleep(nanoseconds: 800_000_000) }
+            guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("s\(i)-\(s.rawValue.prefix(5)).png"))
+        }
     }
 
     /// Submits and grades a mixed set of answers through the real services, then captures the M5 screens.

@@ -4,7 +4,8 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$PWD
-OUT=$ROOT/.build-manual/out
+# CONFIG=release builds optimised into a separate folder, so debug and release never mix.
+if [ "${CONFIG:-debug}" = release ]; then OUT=$ROOT/.build-manual/out-release; OPT=(-O); else OUT=$ROOT/.build-manual/out; OPT=(-Onone -g); fi
 DEPS=$ROOT/.build-manual/deps
 GRDB_TAG=v7.9.0
 CLT=/Library/Developer/CommandLineTools
@@ -19,7 +20,7 @@ if [ -f $CLT/usr/include/swift/module.modulemap ] && [ -f $CLT/usr/include/swift
   VFS=(-vfsoverlay "$OVERLAY")
 else VFS=(); fi
 
-SWIFTC=(swiftc "${VFS[@]}" -target arm64-apple-macos15.0 -Onone -g)
+SWIFTC=(swiftc "${VFS[@]}" -target arm64-apple-macos15.0 "${OPT[@]}")
 
 build_grdb() {
   [ -f "$OUT/libGRDB.a" ] && return

@@ -33,16 +33,16 @@ struct GradePanel: View {
                         Label(Self.verdictText(e), systemImage: good ? "checkmark.circle.fill" : "circle.dotted")
                             .font(.title3.weight(.semibold)).foregroundStyle(good ? Theme.mastery : Theme.attention)
                         Text(e.feedback).font(.callout)
-                        Text(Self.trustText(e.trust)).font(.caption).foregroundStyle(.secondary)
+                        Text(Self.trustText(e.trust)).font(.caption).foregroundStyle(Theme.textSecondary)
                         if e.source != .selfReview || e.trust != .selfReported { disagreeMenu }
                     case .pending:
-                        Label("Waiting for a grade", systemImage: "hourglass").font(.title3.weight(.semibold)).foregroundStyle(.secondary)
+                        Label("Waiting for a grade", systemImage: "hourglass").font(.title3.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                         Text("This isn’t counted as right or wrong. Review it yourself against the reference below, or grade many written answers later with ChatGPT (AI Tasks).")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(Theme.textSecondary)
                         if spec.evaluation.method == .codeTests {
                             if pm.app.codeRunner.isAvailable {
                                 Button { Task { await pm.gradeCode() } } label: { Label("Run the tests and grade", systemImage: "play.fill") }.buttonStyle(.primary).disabled(pm.running)
-                            } else { Text("Turn on code execution in Settings to grade this automatically, or review it yourself below.").font(.caption).foregroundStyle(.secondary) }
+                            } else { Text("Turn on code execution in Settings to grade this automatically, or review it yourself below.").font(.caption).foregroundStyle(Theme.textSecondary) }
                         }
                         SelfReviewView(spec: spec, onSave: pm.selfReview)
                     case .needsReview, .evaluatorUnavailable:
@@ -87,7 +87,7 @@ struct SelfReviewView: View {
                 Text("Score yourself against the rubric").font(.subheadline)
                 ForEach(rubric, id: \.criterion) { item in
                     Stepper(value: Binding(get: { points[item.criterion] ?? 0 }, set: { points[item.criterion] = $0 }), in: 0...item.points, step: 0.5) {
-                        HStack { Text(item.criterion); Spacer(); Text("\(points[item.criterion] ?? 0, specifier: "%g") / \(item.points, specifier: "%g")").monospacedDigit().foregroundStyle(.secondary) }
+                        HStack { Text(item.criterion); Spacer(); Text("\(points[item.criterion] ?? 0, specifier: "%g") / \(item.points, specifier: "%g")").monospacedDigit().foregroundStyle(Theme.textSecondary) }
                     }
                 }
                 Button("Save self-review") {
@@ -122,7 +122,7 @@ struct GradeTaskSheet: View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Grade pending answers with ChatGPT").font(.headline)
             Text("Pick written or code answers that are still waiting for a grade. You’ll review exactly what gets shared before copying anything.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Theme.textSecondary)
             if pending.isEmpty {
                 EmptyStateView(symbol: "checkmark.circle", title: "Nothing is waiting", message: "Answers that need a subjective grade appear here after you submit them.")
             } else {
@@ -131,14 +131,14 @@ struct GradeTaskSheet: View {
                 }
                 List(pending.filter { $0.courseId == courseId }) { p in
                     Toggle(isOn: Binding(get: { chosen.contains(p.id) }, set: { if $0 { chosen.insert(p.id) } else { chosen.remove(p.id) } })) {
-                        VStack(alignment: .leading) { Text(p.title); Text(p.type.label).font(.caption).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading) { Text(p.title); Text(p.type.label).font(.caption).foregroundStyle(Theme.textSecondary) }
                     }
                 }.frame(height: 220)
             }
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create Task", action: create).keyboardShortcut(.defaultAction).disabled(chosen.isEmpty) }
         }
-        .padding(20).frame(width: 480)
+        .padding(Theme.Space.xl).frame(width: 480).background(Theme.background)
         .onAppear {
             pending = (try? model.evaluation?.pendingAttempts()) ?? []
             courseId = courseIds.first

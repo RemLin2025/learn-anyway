@@ -11,8 +11,8 @@ struct MathView: View {
             if let node = try? Latex.parse(latex) {
                 MathNodeView(node: node, size: size)
             } else {
-                Text(latex).font(.system(size: size * 0.8, design: .monospaced)).foregroundStyle(.secondary)
-                    .help("This formula uses LaTeX Braincell can’t typeset yet; showing the source.")
+                Text(latex).font(.system(size: size * 0.8, design: .monospaced)).foregroundStyle(Theme.textSecondary)
+                    .help("This formula uses LaTeX Learn Anyway can’t typeset yet; showing the source.")
             }
         }
         .fixedSize()

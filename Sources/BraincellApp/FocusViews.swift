@@ -25,7 +25,7 @@ struct FocusPopover: View {
         VStack(alignment: .leading, spacing: 12) {
             if let t = focus.timer {
                 VStack(spacing: 6) {
-                    Text(t.kind.label).font(.caption).foregroundStyle(.secondary)
+                    Text(t.kind.label).font(.caption).foregroundStyle(Theme.textSecondary)
                     Text(focus.remainingText).font(.system(size: 40, weight: .semibold, design: .rounded)).monospacedDigit()
                         .accessibilityLabel("\(focus.remainingText) remaining")
                     MeterBar(value: t.activeSeconds / t.plannedSeconds, tint: t.kind == .work ? Theme.accent : Theme.mastery)
@@ -40,7 +40,7 @@ struct FocusPopover: View {
                     Card {
                         VStack(alignment: .leading, spacing: 6) {
                             Text(k == .work ? "Focus interval finished" : "Break over").font(.headline)
-                            Text(k == .work ? "Nothing was submitted or discarded." : "Ready for another round?").font(.caption).foregroundStyle(.secondary)
+                            Text(k == .work ? "Nothing was submitted or discarded." : "Ready for another round?").font(.caption).foregroundStyle(Theme.textSecondary)
                             HStack {
                                 if k == .work { Button("Start break") { focus.start(focus.settings.next(after: .work, completedFocusCount: focus.completedToday)) } }
                                 Button(k == .work ? "Not now" : "Start focus") { if k == .work { focus.dismissEnd() } else { focus.start(.work) } }
@@ -69,7 +69,7 @@ struct FocusPopover: View {
             Toggle("Notify when an interval ends", isOn: $focus.notifyOnEnd).help("Asks macOS for permission the first time")
             Toggle("Show timer in the menu bar", isOn: $focus.showMenuBar)
             Text("\(focus.completedToday) focus interval\(focus.completedToday == 1 ? "" : "s") completed today. Focus time is only a record: it never changes mastery.")
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(Theme.textSecondary)
         }
         .padding(16).frame(width: 320)
     }
@@ -118,6 +118,6 @@ struct FocusMenuBarContent: View {
             Button("Start focus (\(focus.settings.focusMinutes) min)") { focus.start(.work) }
         }
         Divider()
-        Button("Open Braincell") { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first?.makeKeyAndOrderFront(nil) }
+        Button("Open Learn Anyway") { NSApp.activate(ignoringOtherApps: true); NSApp.windows.first?.makeKeyAndOrderFront(nil) }
     }
 }

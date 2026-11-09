@@ -16,7 +16,7 @@ struct AITaskCenterView: View {
             VStack(spacing: 0) {
                 if tasks.isEmpty {
                     EmptyStateView(symbol: "tray.and.arrow.up", title: "No AI tasks",
-                                   message: "Prepare a request, copy it into your own ChatGPT chat, then bring the JSON reply back. Braincell never contacts ChatGPT for you.",
+                                   message: "Prepare a request, copy it into your own ChatGPT chat, then bring the JSON reply back. Learn Anyway never contacts ChatGPT for you.",
                                    actionTitle: "New Generation Task") { showNew = true }
                 } else {
                     List(tasks, selection: $selected) { t in
@@ -28,7 +28,7 @@ struct AITaskCenterView: View {
                     }
                 }
             }
-            .frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+            .sidePanel().frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
 
             Group {
                 if let id = selected, let task = tasks.first(where: { $0.id == id }) { TaskDetailView(task: task, importTarget: $importTarget).id(id) }
@@ -79,8 +79,8 @@ struct TaskDetailView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                Text(task.title).font(.title2.weight(.semibold))
-                Text("Manual workflow: copy or export a request, run it in ChatGPT yourself, then import the JSON reply.").foregroundStyle(.secondary)
+                Text(task.title).font(Theme.sectionTitle)
+                Text("Manual workflow: copy or export a request, run it in ChatGPT yourself, then import the JSON reply.").foregroundStyle(Theme.textSecondary)
                 ForEach(batches) { b in
                     Card {
                         VStack(alignment: .leading, spacing: 8) {
@@ -88,11 +88,11 @@ struct TaskDetailView: View {
                                 Text(title(b)).font(.headline)
                                 Badge(text: statusLabel(b.status), color: statusColor(b.status))
                                 Spacer()
-                                Text(b.kind == .topics ? "skill proposal" : "\(b.expectedCount) question\(b.expectedCount == 1 ? "" : "s")").foregroundStyle(.secondary)
+                                Text(b.kind == .topics ? "skill proposal" : "\(b.expectedCount) question\(b.expectedCount == 1 ? "" : "s")").foregroundStyle(Theme.textSecondary)
                             }
                             if b.status == .awaitingImport, let at = b.exportedAt {
                                 Text("Exported \(at.formatted(date: .abbreviated, time: .shortened)) via \(b.transferMethod?.rawValue ?? "—"). Request ID: \(b.requestId)")
-                                    .font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+                                    .font(.caption).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
                             }
                             HStack {
                                 Button(b.status == .draft ? "Review & Export…" : "View Request…") { requestBatch = b }
@@ -106,11 +106,11 @@ struct TaskDetailView: View {
                                 if b.status == .incomplete, b.kind != .grade, b.kind != .topics { Button("Create Continuation Request") { make { try model.ai?.createContinuationBatch(from: b.id) } } }
                             }
                             if b.kind == .grade, b.status == .needsRepair || b.status == .incomplete {
-                                Text("Some answers weren’t graded. They stay pending (not wrong). Create a new grading task for them from Grade Pending….").font(.caption).foregroundStyle(.secondary)
+                                Text("Some answers weren’t graded. They stay pending (not wrong). Create a new grading task for them from Grade Pending….").font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                             if let last = (try? model.ai?.imports(batchId: b.id))?.first(where: { $0.outcome == .imported }) {
                                 Text("Last import: \(last.acceptedCount) added, \(last.duplicateCount) duplicate, \(last.rejectedCount) rejected of \(last.returnedCount)")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                         }
                     }
@@ -119,7 +119,7 @@ struct TaskDetailView: View {
         }
         .task(id: model.revision) { batches = (try? model.ai?.batches(taskId: task.id)) ?? [] }
         .sheet(item: $requestBatch) { RequestSheet(batch: $0) }
-        .sheet(item: $reviewBatch) { b in TopicReviewView(batchId: b.id) { reviewBatch = nil }.padding(20).frame(width: 720, height: 580) }
+        .sheet(item: $reviewBatch) { b in TopicReviewView(batchId: b.id) { reviewBatch = nil }.padding(Theme.Space.xl).frame(width: 720, height: 580).background(Theme.background) }
     }
 
     private func make(_ f: () throws -> AITaskBatch?) { model.perform { _ = try f() } }
@@ -146,6 +146,7 @@ struct RequestSheet: View {
     @State private var method: TransferMethod = .clipboard
     @State private var message: String?
     @State private var confirmSend = false
+    @State private var confirmGateway = false
     @State private var sending = false
 
     var body: some View {
@@ -164,7 +165,7 @@ struct RequestSheet: View {
                         if m.kind != .grade, m.kind != .topics { Text("• \(m.existingQuestionTitles) existing question title(s) (to avoid duplicates)") }
                         if m.repairEntries > 0 { Text("• \(m.repairEntries) question(s) to repair") }
                         if m.includesUserNotes { Text("• Your extra guidance note") }
-                        ForEach(m.excluded, id: \.self) { Text("✕ " + $0).foregroundStyle(.secondary) }
+                        ForEach(m.excluded, id: \.self) { Text("✕ " + $0).foregroundStyle(Theme.textSecondary) }
                     }.font(.callout)
                 }
                 Picker("Transfer", selection: $method) {
@@ -173,24 +174,31 @@ struct RequestSheet: View {
                     }
                 }.pickerStyle(.segmented)
                 Text("Recommended: \(m.recommendedTransfer == .clipboard ? "clipboard" : "files") (\(m.characterCount) characters). \(method == .clipboard && m.recommendedTransfer == .file ? "This is long for one message; ChatGPT may truncate it." : "")")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
                 TextEditor(text: .constant(method == .clipboard ? pkg.singlePrompt : pkg.coverPrompt + "\n\nFiles: " + pkg.files.map(\.name).joined(separator: ", ")))
-                    .font(.system(.caption, design: .monospaced)).frame(minHeight: 160).border(.quaternary)
+                    .font(.system(.caption, design: .monospaced)).frame(minHeight: 160).fieldSurface()
                 if let message { Text(message).font(.callout) }
                 HStack {
                     Spacer()
                     Button("Close") { dismiss() }.keyboardShortcut(.cancelAction)
-                    if model.directAPIEnabled {
+                    if let t = gatewayTarget {
+                        Button(sending ? "Sending…" : "Send via \(t.model.displayName)…") { confirmGateway = true }.disabled(sending)
+                            .help("Routed by your AI Workflow settings. Usage is tracked in Settings → Usage & Analytics.")
+                    } else if model.directAPIEnabled {
                         Button(sending ? "Sending…" : "Send to Anthropic API…") { confirmSend = true }.disabled(sending || !model.hasAPIKey)
                             .help(model.hasAPIKey ? "Sends this request to the Anthropic API" : "Add an API key in Settings first")
                     }
                     if method == .clipboard { Button("Copy to Clipboard") { copy(pkg) }.keyboardShortcut(.defaultAction) }
                     else { Button("Export Files…") { export(pkg) }.keyboardShortcut(.defaultAction) }
                 }
-                Text("Braincell does not open ChatGPT for you. Paste or attach this yourself, then use Import Response.").font(.caption).foregroundStyle(.secondary)
+                Text("Learn Anyway does not open ChatGPT for you. Paste or attach this yourself, then use Import Response.").font(.caption).foregroundStyle(Theme.textSecondary)
             } else { ProgressView() }
         }
-        .padding(20).frame(width: 640, height: 640)
+        .padding(Theme.Space.xl).frame(width: 640, height: 640).background(Theme.background)
+        .confirmationDialog("Send this request to \(gatewayTarget?.connection.name ?? "the provider")?", isPresented: $confirmGateway, titleVisibility: .visible) {
+            Button("Send \(pkg?.manifest.characterCount ?? 0) characters") { sendDirect(viaGateway: true) }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text(gatewayTarget?.connection.spec?.isLocal == true ? "This stays on this Mac. The reply is checked like a pasted one before anything is saved." : "Everything listed under “This will be shared” leaves your device and may be billed by the provider. The reply is checked like a pasted one before anything is saved.") }
         .confirmationDialog("Send this request to Anthropic?", isPresented: $confirmSend, titleVisibility: .visible) {
             Button("Send \(pkg?.manifest.characterCount ?? 0) characters to \(model.directAPIModel)") { sendDirect() }
             Button("Cancel", role: .cancel) {}
@@ -201,13 +209,19 @@ struct RequestSheet: View {
         }
     }
 
-    private func sendDirect() {
+    private var gatewayTarget: Target? {
+        guard let svc = model.directAI, let gw = model.gateway else { return nil }
+        return svc.gatewayTarget(batchId: batch.id, via: gw)
+    }
+
+    private func sendDirect(viaGateway: Bool = false) {
         guard let svc = model.directAI else { return }
         sending = true; message = nil
         Task {
             defer { sending = false }
             do {
-                let r = try await svc.send(batchId: batch.id)
+                let r: AnyImportReport
+                if viaGateway, let gw = model.gateway { r = try await svc.send(batchId: batch.id, via: gw) } else { r = try await svc.send(batchId: batch.id) }
                 model.reload()
                 switch r {
                 case .questions(let q): message = q.alreadyImported ? "This reply had already been imported." : "Imported \(q.accepted.count) question(s); \(q.rejected.count) rejected. See the task for details."
@@ -259,8 +273,8 @@ struct ImportSheet: View {
             Text(target.batch.map { "Import response for batch \($0.ordinal + 1)" } ?? "Import response").font(.headline)
             if let topicBatch { TopicReviewView(batchId: topicBatch) { dismiss() } } else if let gradeReport { gradeResults(gradeReport) } else if let report { results(report) } else {
                 Text("Paste ChatGPT’s JSON reply (a ```json fence is fine). The requestId inside decides which request it answers.")
-                    .font(.caption).foregroundStyle(.secondary)
-                TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 240).border(.quaternary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+                TextEditor(text: $text).font(.system(.caption, design: .monospaced)).frame(minHeight: 240).fieldSurface()
                 if let error { Text(error).foregroundStyle(.red).font(.callout) }
                 HStack {
                     Button("Paste from Clipboard") { text = NSPasteboard.general.string(forType: .string) ?? "" }
@@ -271,7 +285,7 @@ struct ImportSheet: View {
                 }
             }
         }
-        .padding(20).frame(width: topicBatch == nil ? 600 : 720, height: topicBatch == nil ? 460 : 580)
+        .padding(Theme.Space.xl).frame(width: topicBatch == nil ? 600 : 720, height: topicBatch == nil ? 460 : 580).background(Theme.background)
         .fileImporter(isPresented: $picking, allowedContentTypes: [.json, .plainText]) { r in
             guard case .success(let url) = r else { return }
             let scoped = url.startAccessingSecurityScopedResource(); defer { if scoped { url.stopAccessingSecurityScopedResource() } }
@@ -394,17 +408,17 @@ struct NewTaskSheet: View {
                         ForEach(allSkills) { s in Toggle(s.name, isOn: Binding(get: { skillIds.contains(s.id) }, set: { if $0 { skillIds.insert(s.id) } else { skillIds.remove(s.id) } })) }
                     }
                     Section("Include text from documents (only checked ones are shared)") {
-                        if docs.isEmpty { Text("No documents imported for this course").foregroundStyle(.secondary) }
+                        if docs.isEmpty { Text("No documents imported for this course").foregroundStyle(Theme.textSecondary) }
                         ForEach(docs) { d in Toggle(d.title, isOn: Binding(get: { docIds.contains(d.id) }, set: { if $0 { docIds.insert(d.id) } else { docIds.remove(d.id) } })) }
                     }
                     Toggle("Include existing question titles (avoids duplicates)", isOn: $includeExisting)
                     TextField("Extra guidance (optional)", text: $notes)
-                }.formStyle(.grouped)
+                }.formStyle(.grouped).scrollContentBackground(.hidden)
             }
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
                 Button("Create Task", action: create).keyboardShortcut(.defaultAction).disabled(courseId == nil) }
         }
-        .padding(20).frame(width: 520, height: 640)
+        .padding(Theme.Space.xl).frame(width: 520, height: 640).background(Theme.background)
         .onAppear {
             courseId = request?.courseId ?? model.selectedCourseID ?? model.courseList.first?.id
             skillIds = Set(request?.skillIds ?? []); notes = request?.notes ?? ""

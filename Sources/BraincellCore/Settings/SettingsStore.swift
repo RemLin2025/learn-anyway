@@ -15,6 +15,12 @@ public enum SettingKey: String, Sendable {
     case codeExecutionEnabled // true once the learner opts in to sandboxed code execution
     case directAPIEnabled    // true once the learner opts in to sending requests straight to the Anthropic API
     case directAPIModel      // model id used for direct requests
+    case budgetDaily         // USD, empty = none
+    case budgetMonthly
+    case budgetPerRequest    // warn above this estimated cost
+    case budgetWarnPercent   // default 80
+    case budgetMaxRequestsPerDay // hard app-level request cap
+    case budgetEnforce       // true = block requests once a daily/monthly budget is spent
     case viewedProgress      // true once the learner has opened Skills or Insights
 }
 

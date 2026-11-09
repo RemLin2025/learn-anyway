@@ -26,9 +26,8 @@ struct InsightsView: View {
             HStack {
                 Picker("Course", selection: $courseId) { ForEach(model.courseList) { Text($0.name).tag(UUID?.some($0.id)) } }.frame(maxWidth: 280)
                 Spacer()
-                Text("Based only on what you’ve answered. Braincell doesn’t predict exam grades.").font(.caption).foregroundStyle(.secondary)
-            }.padding(12)
-            Divider()
+                Text("Based only on what you’ve answered. Learn Anyway doesn’t predict exam grades.").font(.caption).foregroundStyle(Theme.textSecondary)
+            }.padding(12).controlStrip()
             if model.courseList.isEmpty {
                 EmptyStateView(symbol: "chart.line.uptrend.xyaxis", title: "Not enough evidence yet", message: "Insights are built from your practice. Create a course and answer some questions to see your history here.")
             } else if sessions.isEmpty && attempts.isEmpty {
@@ -62,7 +61,7 @@ struct InsightsView: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Exam coverage").font(.headline)
-                if exams.isEmpty { Text("No assessments yet. Add one in the course to see coverage here.").foregroundStyle(.secondary) }
+                if exams.isEmpty { Text("No assessments yet. Add one in the course to see coverage here.").foregroundStyle(Theme.textSecondary) }
                 ForEach(exams) { e in
                     VStack(alignment: .leading, spacing: 3) {
                         HStack {
@@ -73,8 +72,8 @@ struct InsightsView: View {
                         }
                         MeterBar(value: Double(e.progress.assessedSkillCount) / Double(max(1, e.progress.skillCount)), tint: Theme.mastery)
                             .accessibilityLabel("\(e.assessment.name) coverage").accessibilityValue("\(e.progress.assessedSkillCount) of \(e.progress.skillCount) topics assessed")
-                        Text(e.summary).font(.caption).foregroundStyle(.secondary)
-                        Text("\(e.progress.attemptedQuestionCount) of \(e.progress.questionCount) questions attempted").font(.caption).foregroundStyle(.secondary)
+                        Text(e.summary).font(.caption).foregroundStyle(Theme.textSecondary)
+                        Text("\(e.progress.attemptedQuestionCount) of \(e.progress.questionCount) questions attempted").font(.caption).foregroundStyle(Theme.textSecondary)
                     }.accessibilityElement(children: .contain)
                 }
             }
@@ -87,7 +86,7 @@ struct InsightsView: View {
                 Text("Study time, last 30 days").font(.headline)
                 let total = days.reduce(0) { $0 + $1.minutes }
                 Text("\(Int(total.rounded())) min on answered questions · \(days.reduce(0) { $0 + $1.attempts }) answers" + (focusMinutes > 0 ? " · \(focusMinutes) min of focus timer" : ""))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
                 Chart(days, id: \.day) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Minutes", $0.minutes)).foregroundStyle(Theme.accent) }
                     .frame(height: 140).chartYAxisLabel("min")
                     .accessibilityLabel("Study minutes per day for the last 30 days, \(Int(total.rounded())) minutes in total")
@@ -100,11 +99,11 @@ struct InsightsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Reviews due").font(.headline)
                 if forecast.allSatisfy({ $0.due == 0 }) {
-                    Label("No reviews due in the next week", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                    Label("No reviews due in the next week", systemImage: "checkmark.circle").foregroundStyle(Theme.textSecondary)
                 } else {
                     Chart(forecast, id: \.day) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Cards", $0.due)).foregroundStyle(Theme.mastery) }
                         .frame(height: 140).accessibilityLabel("Reviews due per day over the next week")
-                    Text("Today includes anything overdue.").font(.caption).foregroundStyle(.secondary)
+                    Text("Today includes anything overdue.").font(.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -118,13 +117,13 @@ struct InsightsView: View {
                     Picker("Skill", selection: $skillId) { Text("Choose a skill").tag(UUID?.none); ForEach(skills) { Text($0.name).tag(UUID?.some($0.id)) } }.frame(maxWidth: 260)
                 }
                 let pts = trend.filter { $0.overall != nil }
-                if skillId == nil { Text("Pick a skill to see how its estimate has moved.").foregroundStyle(.secondary) }
-                else if pts.count < 2 { Text("Not enough evidence yet: a trend needs at least two graded answers (\(pts.count) so far).").foregroundStyle(.secondary) }
+                if skillId == nil { Text("Pick a skill to see how its estimate has moved.").foregroundStyle(Theme.textSecondary) }
+                else if pts.count < 2 { Text("Not enough evidence yet: a trend needs at least two graded answers (\(pts.count) so far).").foregroundStyle(Theme.textSecondary) }
                 else {
                     Chart(pts, id: \.at) { LineMark(x: .value("Date", $0.at), y: .value("Estimate", ($0.overall ?? 0) * 100)).foregroundStyle(Theme.mastery); PointMark(x: .value("Date", $0.at), y: .value("Estimate", ($0.overall ?? 0) * 100)).foregroundStyle(Theme.mastery) }
                         .chartYScale(domain: 0...100).frame(height: 160).chartYAxisLabel("est. %")
                         .accessibilityLabel("Estimated mastery over time, \(pts.count) points")
-                    Text("Each point is one graded answer. Early points rest on little evidence.").font(.caption).foregroundStyle(.secondary)
+                    Text("Each point is one graded answer. Early points rest on little evidence.").font(.caption).foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -136,19 +135,19 @@ struct InsightsView: View {
                 Text("How well does the mastery estimate predict you?").font(.headline)
                 if let r = calibration, let cur = r.current {
                     Text("Each answer is predicted from your earlier answers only, then compared with what you scored. \(r.predictions) predictions across \(r.skills) skills. Lower error is better.")
-                        .font(.caption).foregroundStyle(.secondary)
-                    if !r.enoughData { Label("Fewer than \(CalibrationReport.minimumPredictions) predictions: too early to read anything into this, and no changes are suggested.", systemImage: "info.circle").font(.callout).foregroundStyle(.secondary) }
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
+                    if !r.enoughData { Label("Fewer than \(CalibrationReport.minimumPredictions) predictions: too early to read anything into this, and no changes are suggested.", systemImage: "info.circle").font(.callout).foregroundStyle(Theme.textSecondary) }
                     HStack(spacing: 24) {
-                        VStack(alignment: .leading) { Text("Estimator error").font(.caption).foregroundStyle(.secondary); Text(String(format: "%.3f", cur.brier)).font(.title3.monospacedDigit()) }
-                        if let b = r.baseline { VStack(alignment: .leading) { Text("Plain average").font(.caption).foregroundStyle(.secondary); Text(String(format: "%.3f", b.brier)).font(.title3.monospacedDigit()) } }
-                        if let bias = r.bias { VStack(alignment: .leading) { Text("Tendency").font(.caption).foregroundStyle(.secondary); Text(abs(bias) < 0.05 ? "Balanced" : bias > 0 ? "Too optimistic" : "Too pessimistic").font(.title3) } }
+                        VStack(alignment: .leading) { Text("Estimator error").font(.caption).foregroundStyle(Theme.textSecondary); Text(String(format: "%.3f", cur.brier)).font(.title3.monospacedDigit()) }
+                        if let b = r.baseline { VStack(alignment: .leading) { Text("Plain average").font(.caption).foregroundStyle(Theme.textSecondary); Text(String(format: "%.3f", b.brier)).font(.title3.monospacedDigit()) } }
+                        if let bias = r.bias { VStack(alignment: .leading) { Text("Tendency").font(.caption).foregroundStyle(Theme.textSecondary); Text(abs(bias) < 0.05 ? "Balanced" : bias > 0 ? "Too optimistic" : "Too pessimistic").font(.title3) } }
                     }.accessibilityElement(children: .combine)
                     ForEach(r.bins, id: \.lower) { b in
                         Text("Predicted \(Int(b.meanPredicted * 100))% → scored \(Int(b.meanActual * 100))% (\(b.count) answers)").font(.callout.monospacedDigit())
                     }
                     if let s = r.suggestion { Label(s, systemImage: "lightbulb").font(.callout) }
                 } else {
-                    Text("Not enough data yet. This needs at least two answers on the same skill.").font(.callout).foregroundStyle(.secondary)
+                    Text("Not enough data yet. This needs at least two answers on the same skill.").font(.callout).foregroundStyle(Theme.textSecondary)
                 }
             }
         }
@@ -158,14 +157,14 @@ struct InsightsView: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Text("XP and milestones").font(.headline)
-                if let t = xp.last?.total { Text("\(t) XP (course level \(XPRules.level(forXP: t))). XP rewards effort and is separate from mastery.").font(.caption).foregroundStyle(.secondary) }
+                if let t = xp.last?.total { Text("\(t) XP (course level \(XPRules.level(forXP: t))). XP rewards effort and is separate from mastery.").font(.caption).foregroundStyle(Theme.textSecondary) }
                 if xp.count >= 2 { Chart(xp, id: \.day) { LineMark(x: .value("Day", $0.day, unit: .day), y: .value("XP", $0.total)).foregroundStyle(Theme.accent) }.frame(height: 110).accessibilityLabel("Cumulative XP by day") }
                 ForEach(milestones.prefix(6)) { m in Label(m.title, systemImage: "flag.fill").font(.callout) }
                 DisclosureGroup("Ledger (every award and correction)") {
                     VStack(alignment: .leading, spacing: 4) {
                         ForEach(ledger.prefix(30)) { e in
                             HStack {
-                                Text(e.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary).frame(width: 130, alignment: .leading)
+                                Text(e.createdAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(Theme.textSecondary).frame(width: 130, alignment: .leading)
                                 Text(e.reason).lineLimit(1)
                                 Spacer()
                                 Text(e.amount > 0 ? "+\(e.amount)" : "\(e.amount)").monospacedDigit().foregroundStyle(e.kind == .correction ? Theme.attention : Theme.accent)
@@ -181,17 +180,17 @@ struct InsightsView: View {
         Card {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Learning history").font(.headline)
-                Text("Mistakes, notes and breakthroughs in one place. Observed from your answers, not guessed.").font(.caption).foregroundStyle(.secondary)
-                if timeline.isEmpty { Text("Nothing here yet.").foregroundStyle(.secondary) }
+                Text("Mistakes, notes and breakthroughs in one place. Observed from your answers, not guessed.").font(.caption).foregroundStyle(Theme.textSecondary)
+                if timeline.isEmpty { Text("Nothing here yet.").foregroundStyle(Theme.textSecondary) }
                 ForEach(timeline.prefix(25)) { e in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: icon(e.kind)).foregroundStyle(color(e.kind)).frame(width: 20)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(e.title)
-                            if !e.detail.isEmpty { Text(e.detail).font(.caption).foregroundStyle(.secondary) }
+                            if !e.detail.isEmpty { Text(e.detail).font(.caption).foregroundStyle(Theme.textSecondary) }
                         }
                         Spacer()
-                        Text(e.at.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
+                        Text(e.at.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(Theme.textSecondary)
                     }.accessibilityElement(children: .combine)
                 }
             }
@@ -204,10 +203,10 @@ struct InsightsView: View {
                 Text("Recent sessions").font(.headline)
                 ForEach(sessions.prefix(6)) { s in
                     HStack {
-                        VStack(alignment: .leading) { Text(s.session.title); Text(s.session.startedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(.secondary) }
+                        VStack(alignment: .leading) { Text(s.session.title); Text(s.session.startedAt.formatted(date: .abbreviated, time: .shortened)).font(.caption).foregroundStyle(Theme.textSecondary) }
                         Spacer()
                         Text("\(s.answered)/\(s.total) answered").font(.callout)
-                        Text("\(s.correct) correct\(s.pending > 0 ? " · \(s.pending) waiting" : "")").font(.caption).foregroundStyle(.secondary)
+                        Text("\(s.correct) correct\(s.pending > 0 ? " · \(s.pending) waiting" : "")").font(.caption).foregroundStyle(Theme.textSecondary)
                         Text("+\(s.xp) XP").font(.caption).foregroundStyle(Theme.accent)
                     }.accessibilityElement(children: .combine)
                 }
@@ -217,8 +216,8 @@ struct InsightsView: View {
                             HStack {
                                 Text(a.title).lineLimit(1)
                                 Spacer()
-                                Text(verdict(a.evaluation)).font(.caption).foregroundStyle(.secondary)
-                                if a.attempt.hintsUsed > 0 { Image(systemName: "lightbulb").font(.caption).foregroundStyle(.secondary).accessibilityLabel("\(a.attempt.hintsUsed) hints used") }
+                                Text(verdict(a.evaluation)).font(.caption).foregroundStyle(Theme.textSecondary)
+                                if a.attempt.hintsUsed > 0 { Image(systemName: "lightbulb").font(.caption).foregroundStyle(Theme.textSecondary).accessibilityLabel("\(a.attempt.hintsUsed) hints used") }
                             }.font(.callout).accessibilityElement(children: .combine)
                         }
                     }.padding(.top, 4)

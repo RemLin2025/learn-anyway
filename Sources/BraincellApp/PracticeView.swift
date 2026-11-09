@@ -44,15 +44,15 @@ struct PracticeView: View {
         HStack(spacing: 12) {
             Button { pm.exit() } label: { Label("Exit", systemImage: "chevron.left") }
                 .help("Leave the session. Your work is saved and you can resume it from Home.")
-            Text(pm.session?.title ?? "Practice").font(.headline).lineLimit(1)
+            Text(pm.session?.title ?? "Practice").font(Theme.cardTitle).lineLimit(1)
             Spacer()
             if !pm.items.isEmpty {
-                Text("\(pm.index + 1) of \(pm.items.count)").monospacedDigit().foregroundStyle(.secondary)
+                Text("\(pm.index + 1) of \(pm.items.count)").font(.system(.callout, design: .rounded, weight: .medium)).monospacedDigit().foregroundStyle(Theme.textSecondary)
                 MeterBar(value: Double(pm.items.filter { $0.status == .submitted }.count) / Double(max(1, pm.items.count)), tint: Theme.mastery).frame(width: 110)
                     .accessibilityLabel("Progress").accessibilityValue("\(pm.items.filter { $0.status == .submitted }.count) of \(pm.items.count) submitted")
             }
             FocusChip()
-            Text(Self.clock(pm.seconds)).monospacedDigit().foregroundStyle(.secondary).help("Active time on this question")
+            Text(Self.clock(pm.seconds)).font(.system(.callout, design: .rounded)).monospacedDigit().foregroundStyle(Theme.textSecondary).help("Active time on this question")
                 .accessibilityLabel("Active time \(pm.seconds / 60) minutes \(pm.seconds % 60) seconds")
             Button { pm.togglePause() } label: { Image(systemName: pm.paused ? "play.fill" : "pause.fill") }
                 .help(pm.paused ? "Resume" : "Pause the timer").accessibilityLabel(pm.paused ? "Resume" : "Pause")
@@ -61,7 +61,7 @@ struct PracticeView: View {
             }
             Button("Finish") { pm.finish() }.help("End the session and see a summary")
         }
-        .padding(.horizontal, 16).padding(.vertical, 10).background(Theme.surface)
+        .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md).background(Theme.surface)
     }
 
     private func bottomBar(_ spec: QuestionSpec) -> some View {
@@ -85,14 +85,14 @@ struct PracticeView: View {
                 Button("Next Question") { pm.go(1) }.buttonStyle(.primary).keyboardShortcut(.return, modifiers: .command)
             }
         }
-        .padding(.horizontal, 16).padding(.vertical, 10).background(Theme.surface)
+        .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md).background(Theme.surface)
     }
 
     private var pausedOverlay: some View {
         VStack(spacing: 12) {
             Image(systemName: "pause.circle").font(.system(size: 40)).foregroundStyle(Theme.accent)
-            Text("Paused").font(.title2.weight(.semibold))
-            Text("The timer is stopped and your work is saved.").foregroundStyle(.secondary)
+            Text("Paused").font(Theme.sectionTitle)
+            Text("The timer is stopped and your work is saved.").foregroundStyle(Theme.textSecondary)
             Button("Resume") { pm.togglePause() }.buttonStyle(.primary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity).background(.regularMaterial)
@@ -105,8 +105,9 @@ struct PracticeView: View {
     private func focus(_ spec: QuestionSpec) -> some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                header(spec)
-                BlocksView(blocks: spec.content)
+                Card(padding: Theme.Space.xl) {
+                    VStack(alignment: .leading, spacing: Theme.Space.lg) { header(spec); BlocksView(blocks: spec.content) }
+                }
                 AnswerView(spec: spec, response: $pm.response, locked: pm.locked, fontSize: CGFloat(app.codeFontSize), pm: pm, onSubmit: pm.submit)
                 ConfidenceRow(pm: pm)
                 hints(spec)
@@ -131,7 +132,7 @@ struct PracticeView: View {
             }.frame(minWidth: 340, idealWidth: 520)
             if showCoach {
                 ScrollView { VStack(alignment: .leading, spacing: 14) { coach(spec) }.padding(16).frame(maxWidth: .infinity, alignment: .leading) }
-                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 320).background(Theme.surface.opacity(0.5))
+                    .frame(minWidth: 200, idealWidth: 240, maxWidth: 320).background(Theme.surface)
             }
         }
     }
@@ -139,7 +140,7 @@ struct PracticeView: View {
     private func header(_ spec: QuestionSpec) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(spacing: 6) {
-                Badge(text: spec.type.label); Badge(text: "Difficulty \(spec.difficulty)/5", color: .secondary)
+                Badge(text: spec.type.label); Badge(text: "Difficulty \(spec.difficulty)/5", color: Theme.textSecondary)
                 if let it = pm.item, it.kind != .practice {
                     Badge(text: it.kind == .diagnostic ? "Quick check" : it.kind.rawValue.capitalized, color: it.kind == .review ? Theme.mastery : (it.kind == .repair ? Theme.attention : Theme.accent))
                 }
@@ -148,7 +149,7 @@ struct PracticeView: View {
                         .popover(isPresented: $showWhy) { Text(it.reason).padding(14).frame(width: 320, alignment: .leading) }
                 }
             }
-            Text(spec.title).font(.title2.weight(.semibold))
+            Text(spec.title).font(Theme.sectionTitle)
         }
     }
 
@@ -163,9 +164,9 @@ struct PracticeView: View {
     }
 
     @ViewBuilder private func coach(_ spec: QuestionSpec) -> some View {
-        Text("Help").font(.headline)
-        Text("On demand. Using hints is recorded.").font(.caption).foregroundStyle(.secondary)
-        if spec.hints.isEmpty { Text("No hints for this question.").foregroundStyle(.secondary) }
+        Text("Help").font(Theme.cardTitle)
+        Text("On demand. Using hints is recorded.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+        if spec.hints.isEmpty { Text("No hints for this question.").foregroundStyle(Theme.textSecondary) }
         hints(spec)
         if !pm.locked, pm.hintsUsed < spec.hints.count { Button("Show hint \(pm.hintsUsed + 1) of \(spec.hints.count)") { pm.revealHint() } }
         if !spec.sources.isEmpty {
@@ -199,19 +200,19 @@ struct AnswerView: View {
         case .flashcard: flashcard
         case .singleChoice, .multipleSelect: choices
         case .shortAnswer:
-            TextField("Your answer", text: $response.text).textFieldStyle(.roundedBorder).font(.title3).disabled(locked)
+            TextField("Your answer", text: $response.text).textFieldStyle(AppFieldStyle()).font(.title3).disabled(locked)
                 .onSubmit { if !response.isEmpty { onSubmit() } }.accessibilityLabel("Your answer")
         case .numeric:
             HStack {
-                TextField("Number (e.g. 3.5 or 7/2)", text: $response.text).textFieldStyle(.roundedBorder).font(.title3).frame(maxWidth: 260).disabled(locked)
+                TextField("Number (e.g. 3.5 or 7/2)", text: $response.text).textFieldStyle(AppFieldStyle()).font(.title3).frame(maxWidth: 260).disabled(locked)
                     .onSubmit { if !response.isEmpty { onSubmit() } }.accessibilityLabel("Numeric answer")
-                if let u = spec.answer.unit, !u.isEmpty { Text(u).foregroundStyle(.secondary) }
+                if let u = spec.answer.unit, !u.isEmpty { Text(u).foregroundStyle(Theme.textSecondary) }
             }
         case .codeTracing:
             VStack(alignment: .leading, spacing: 6) {
-                Text("What is the exact output?").font(.subheadline).foregroundStyle(.secondary)
+                Text("What is the exact output?").font(.subheadline).foregroundStyle(Theme.textSecondary)
                 TextEditor(text: $response.text).font(.system(size: fontSize, design: .monospaced)).frame(minHeight: 100).disabled(locked)
-                    .border(Color.primary.opacity(0.15)).accessibilityLabel("Expected output")
+                    .fieldSurface().accessibilityLabel("Expected output")
             }
         case .coding: coding
         case .longForm, .derivationProof: written
@@ -227,7 +228,7 @@ struct AnswerView: View {
                 Button { response.revealed = true } label: { Label("Show answer", systemImage: "eye") }
                     .buttonStyle(.primary).keyboardShortcut(.space, modifiers: [])
                     .disabled(locked)
-                Text("Try to recall it first. Space reveals the answer.").font(.caption).foregroundStyle(.secondary)
+                Text("Try to recall it first. Space reveals the answer.").font(.caption).foregroundStyle(Theme.textSecondary)
             }
         }
     }
@@ -235,7 +236,7 @@ struct AnswerView: View {
     private var choices: some View {
         let multi = spec.type == .multipleSelect
         return VStack(alignment: .leading, spacing: 8) {
-            if multi { Text("Select all that apply").font(.subheadline).foregroundStyle(.secondary) }
+            if multi { Text("Select all that apply").font(.subheadline).foregroundStyle(Theme.textSecondary) }
             ForEach(Array((spec.answer.choices ?? []).enumerated()), id: \.element.id) { i, c in
                 let on = response.selected.contains(c.id)
                 Button {
@@ -247,10 +248,10 @@ struct AnswerView: View {
                             .foregroundStyle(on ? Theme.accent : .secondary)
                         RichText(text: c.text)
                         Spacer()
-                        if i < 9 { Text("\(i + 1)").font(.caption).foregroundStyle(.secondary) }
+                        if i < 9 { Text("\(i + 1)").font(.caption).foregroundStyle(Theme.textSecondary) }
                     }
-                    .padding(12).background(on ? Theme.accent.opacity(0.12) : Theme.surface, in: RoundedRectangle(cornerRadius: 10))
-                    .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(on ? Theme.accent : Color.primary.opacity(0.08)))
+                    .padding(Theme.Space.md + 2).background(on ? Theme.accent.opacity(0.10) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control + 2))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).strokeBorder(on ? Theme.accent : Theme.border, lineWidth: on ? 1.5 : 1))
                 }
                 .buttonStyle(.plain).disabled(locked)
                 .keyboardShortcut(i < 9 ? KeyEquivalent(Character("\(i + 1)")) : .init("0"), modifiers: [])
@@ -264,22 +265,22 @@ struct AnswerView: View {
         VStack(alignment: .leading, spacing: 8) {
             CodeWorkspaceView(files: $response.files, isEditable: !locked, fontSize: fontSize).frame(minHeight: 280)
             if let pm { CodeRunPanel(pm: pm, spec: spec) }
-            Text("Your files are saved automatically as you type.").font(.caption).foregroundStyle(.secondary)
+            Text("Your files are saved automatically as you type.").font(.caption).foregroundStyle(Theme.textSecondary)
         }
     }
 
     private var written: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text(spec.type == .derivationProof ? "Write your derivation or proof" : "Write your explanation").font(.subheadline).foregroundStyle(.secondary)
+                Text(spec.type == .derivationProof ? "Write your derivation or proof" : "Write your explanation").font(.subheadline).foregroundStyle(Theme.textSecondary)
                 Spacer()
                 Toggle("Preview math", isOn: $previewMath).toggleStyle(.switch).controlSize(.small).accessibilityLabel("Preview math")
             }
-            Text("Use $…$ for inline math and $$…$$ for display math, e.g. $$\\frac{a}{b}$$").font(.caption).foregroundStyle(.secondary)
+            Text("Use $…$ for inline math and $$…$$ for display math, e.g. $$\\frac{a}{b}$$").font(.caption).foregroundStyle(Theme.textSecondary)
             TextEditor(text: $response.text).font(.system(size: fontSize, design: .monospaced)).frame(minHeight: 200).disabled(locked)
-                .border(Color.primary.opacity(0.15)).accessibilityLabel("Written answer")
+                .fieldSurface().accessibilityLabel("Written answer")
             if previewMath, !response.text.isEmpty {
-                Text("Preview").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                Text("Preview").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                 Card { RichText(text: response.text) }
             }
         }
@@ -294,7 +295,7 @@ struct ReferencePanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label("Submitted — your attempt is saved and can’t be changed", systemImage: "lock.fill").font(.subheadline).foregroundStyle(.secondary)
+            Label("Submitted — your attempt is saved and can’t be changed", systemImage: "lock.fill").font(.subheadline).foregroundStyle(Theme.textSecondary)
             Card {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Reference answer").font(.subheadline.weight(.semibold))
@@ -341,7 +342,7 @@ struct SummaryView: View {
             VStack(spacing: 16) {
                 Image(systemName: "checkmark.seal").font(.system(size: 40)).foregroundStyle(Theme.mastery)
                 Text("Session complete").font(.title.weight(.semibold))
-                Text(title).foregroundStyle(.secondary)
+                Text(title).foregroundStyle(Theme.textSecondary)
                 HStack(spacing: 10) {
                     stat("Correct", summary.correct, Theme.mastery); stat("Partly", summary.partial, Theme.attention)
                     stat("Not quite", summary.incorrect, Theme.attention); stat("Waiting", summary.pending + summary.needsReview, .secondary)
@@ -350,10 +351,10 @@ struct SummaryView: View {
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
                         HStack { Label("+\(summary.xp) XP", systemImage: "sparkles").font(.headline).foregroundStyle(Theme.accent); Spacer()
-                            Text("\(summary.hintsUsed) hint\(summary.hintsUsed == 1 ? "" : "s") · \(PracticeView.clock(summary.activeSeconds))").foregroundStyle(.secondary) }
+                            Text("\(summary.hintsUsed) hint\(summary.hintsUsed == 1 ? "" : "s") · \(PracticeView.clock(summary.activeSeconds))").foregroundStyle(Theme.textSecondary) }
                         if summary.provisional > 0 {
                             Text("\(summary.provisional) grade\(summary.provisional == 1 ? " is" : "s are") provisional: the answer key isn’t verified, so they count for less and earn no correctness bonus. Mark a question Verified in the Question Bank to upgrade it.")
-                                .font(.caption).foregroundStyle(.secondary)
+                                .font(.caption).foregroundStyle(Theme.textSecondary)
                         }
                         if summary.pending > 0 {
                             Divider()
@@ -375,14 +376,14 @@ struct SummaryView: View {
                     }
                 }.frame(maxWidth: 560)
                 if isDiagnostic {
-                    Label("A short diagnostic gives early signals only. Skills stay Preliminary until you’ve answered more.", systemImage: "info.circle").font(.callout).foregroundStyle(.secondary).frame(maxWidth: 560)
+                    Label("A short diagnostic gives early signals only. Skills stay Preliminary until you’ve answered more.", systemImage: "info.circle").font(.callout).foregroundStyle(Theme.textSecondary).frame(maxWidth: 560)
                 }
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Anything to remember from this session? (optional)").font(.subheadline)
                         if noteSaved { Label("Saved to your learning history", systemImage: "checkmark").font(.caption).foregroundStyle(Theme.mastery) }
                         else {
-                            HStack { TextField("A short note to your future self", text: $note).textFieldStyle(.roundedBorder)
+                            HStack { TextField("A short note to your future self", text: $note).textFieldStyle(AppFieldStyle())
                                 Button("Save") { onReflect(note); noteSaved = true }.disabled(note.trimmed.isEmpty) }
                         }
                     }
@@ -394,8 +395,8 @@ struct SummaryView: View {
     }
 
     private func stat(_ label: String, _ n: Int, _ color: Color) -> some View {
-        VStack { Text("\(n)").font(.title2.weight(.semibold).monospacedDigit()).foregroundStyle(color); Text(label).font(.caption).foregroundStyle(.secondary) }
-            .frame(width: 84).padding(.vertical, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: 10))
+        VStack { Text("\(n)").font(.title2.weight(.semibold).monospacedDigit()).foregroundStyle(color); Text(label).font(.caption).foregroundStyle(Theme.textSecondary) }
+            .frame(width: 84).padding(.vertical, 10).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control)).overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
             .accessibilityElement(children: .combine)
     }
 

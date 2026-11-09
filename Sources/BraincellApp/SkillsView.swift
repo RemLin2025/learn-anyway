@@ -23,10 +23,8 @@ struct SkillsView: View {
                     Badge(text: "Course level \(s.level) · \(s.xp) XP")
                 }
                 Spacer()
-                Picker("View", selection: $asMap) { Label("List", systemImage: "list.bullet").tag(false); Label("Map", systemImage: "point.3.connected.trianglepath.dotted").tag(true) }
-                    .pickerStyle(.segmented).labelsHidden().frame(width: 130)
-            }.padding(12)
-            Divider()
+                SegmentedControl(selection: $asMap, options: [false, true]) { $0 ? "Map" : "List" }
+            }.padding(12).controlStrip()
             if model.courseList.isEmpty {
                 EmptyStateView(symbol: "point.3.connected.trianglepath.dotted", title: "No skills yet", message: "Create a course and add topics; mastery appears here as you practise.")
             } else if rows.isEmpty {
@@ -41,14 +39,14 @@ struct SkillsView: View {
                             Text(r.skill.name).padding(.leading, CGFloat(r.depth) * 16)
                             Spacer()
                             Badge(text: "Lv \(x?.level ?? 1)", color: Theme.accent)
-                            if let m, !m.isUnknown { Badge(text: m.confidence.label, color: color(m.confidence)) } else { Badge(text: "Unknown", color: .secondary) }
+                            if let m, !m.isUnknown { Badge(text: m.confidence.label, color: color(m.confidence)) } else { Badge(text: "Unknown", color: Theme.textSecondary) }
                         }.tag(r.skill.id).accessibilityElement(children: .combine)
                     } }
-                    }.frame(minWidth: 300, idealWidth: 420)
+                    }.sidePanel().frame(minWidth: 300, idealWidth: 420)
                     Group {
                         if let id = selected, let r = rows.first(where: { $0.skill.id == id }), let m = masteries[id] {
                             SkillDetail(skill: r.skill, mastery: m, xp: xp[id] ?? XPSummary(xp: 0), courseId: courseId!).id("\(id)-\(model.revision)")
-                        } else { EmptyStateView(symbol: "chart.bar.doc.horizontal", title: "Select a skill", message: "See what you’ve shown, how sure Braincell is, and what evidence backs it.") }
+                        } else { EmptyStateView(symbol: "chart.bar.doc.horizontal", title: "Select a skill", message: "See what you’ve shown, how sure Learn Anyway is, and what evidence backs it.") }
                     }.frame(minWidth: 380)
                 }
             }
@@ -86,10 +84,10 @@ struct SkillDetail: View {
                 Text(skill.name).font(.title2.weight(.semibold))
                 Card {
                     VStack(alignment: .leading, spacing: 6) {
-                        HStack { Label("Level \(xp.level)", systemImage: "sparkles").font(.headline).foregroundStyle(Theme.accent); Spacer(); Text("\(xp.xp) XP").foregroundStyle(.secondary) }
+                        HStack { Label("Level \(xp.level)", systemImage: "sparkles").font(.headline).foregroundStyle(Theme.accent); Spacer(); Text("\(xp.xp) XP").foregroundStyle(Theme.textSecondary) }
                         MeterBar(value: Double(xp.xpIntoLevel) / Double(max(1, xp.xpForNextLevel)), tint: Theme.accent)
                             .accessibilityLabel("Progress to next level").accessibilityValue("\(xp.xpIntoLevel) of \(xp.xpForNextLevel) XP")
-                        Text("XP rewards effort and is separate from mastery below.").font(.caption).foregroundStyle(.secondary)
+                        Text("XP rewards effort and is separate from mastery below.").font(.caption).foregroundStyle(Theme.textSecondary)
                     }
                 }
                 Card {
@@ -99,16 +97,16 @@ struct SkillDetail: View {
                             Badge(text: mastery.isUnknown ? "Unknown" : mastery.confidence.label, color: mastery.isUnknown ? .secondary : Theme.mastery)
                         }
                         if mastery.isUnknown {
-                            Text("Unknown — there’s no graded evidence for this skill yet. That doesn’t mean you don’t know it; it hasn’t been assessed.").font(.callout).foregroundStyle(.secondary)
+                            Text("Unknown — there’s no graded evidence for this skill yet. That doesn’t mean you don’t know it; it hasn’t been assessed.").font(.callout).foregroundStyle(Theme.textSecondary)
                         } else {
                             if let o = mastery.overall {
                                 HStack { MeterBar(value: o, tint: Theme.mastery); Text("≈ \(Int((o * 100).rounded()))%").monospacedDigit() }
                                     .accessibilityElement(children: .combine).accessibilityLabel("Estimated mastery about \(Int((o * 100).rounded())) percent, \(mastery.confidence.label) confidence")
                             }
-                            Text(confidenceNote).font(.caption).foregroundStyle(.secondary)
+                            Text(confidenceNote).font(.caption).foregroundStyle(Theme.textSecondary)
                             if let q = mastery.evidenceQuality {
                                 Text("Evidence quality: \(Int((q * 100).rounded()))% of the weight comes from verified or ChatGPT-graded answers; the rest is provisional or self-reviewed.")
-                                    .font(.caption).foregroundStyle(.secondary)
+                                    .font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                         }
                         Divider()
@@ -118,8 +116,8 @@ struct SkillDetail: View {
                                 if let e = d.estimate {
                                     MeterBar(value: e, tint: Theme.mastery)
                                     Text("\(Int((e * 100).rounded()))%").monospacedDigit().frame(width: 40, alignment: .trailing)
-                                    Badge(text: d.confidence.label, color: .secondary)
-                                } else { Text("Not assessed").foregroundStyle(.secondary); Spacer() }
+                                    Badge(text: d.confidence.label, color: Theme.textSecondary)
+                                } else { Text("Not assessed").foregroundStyle(Theme.textSecondary); Spacer() }
                             }.accessibilityElement(children: .combine)
                         }
                     }
@@ -144,7 +142,7 @@ struct SkillDetail: View {
             Card {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Recent mistakes").font(.headline)
-                    Text("Observed from your answers. They’re information, not a verdict.").font(.caption).foregroundStyle(.secondary)
+                    Text("Observed from your answers. They’re information, not a verdict.").font(.caption).foregroundStyle(Theme.textSecondary)
                     ForEach(Array(ms)) { m in
                         VStack(alignment: .leading, spacing: 2) {
                             HStack {
@@ -153,7 +151,7 @@ struct SkillDetail: View {
                                 if m.wasHighConfidence { Badge(text: "you felt sure", color: Theme.accent) }
                                 Spacer()
                             }
-                            if !m.responseSnippet.isEmpty { Text("You answered: \(m.responseSnippet)").font(.caption).foregroundStyle(.secondary).lineLimit(1) }
+                            if !m.responseSnippet.isEmpty { Text("You answered: \(m.responseSnippet)").font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(1) }
                         }.accessibilityElement(children: .combine)
                     }
                 }
@@ -180,9 +178,9 @@ struct SkillDetail: View {
                         HStack {
                             Text((try? model.db?.read { try QuestionRevision.fetchOne($0, key: e.revisionId)?.title }) ?? "Question").lineLimit(1)
                             Spacer()
-                            Text(e.dimension.label).font(.caption).foregroundStyle(.secondary)
+                            Text(e.dimension.label).font(.caption).foregroundStyle(Theme.textSecondary)
                             Text("\(Int((e.score * 100).rounded()))%").monospacedDigit().foregroundStyle(e.score >= 0.8 ? Theme.mastery : Theme.attention)
-                            if e.hintsUsed > 0 { Image(systemName: "lightbulb").foregroundStyle(.secondary).help("\(e.hintsUsed) hint(s) used") }
+                            if e.hintsUsed > 0 { Image(systemName: "lightbulb").foregroundStyle(Theme.textSecondary).help("\(e.hintsUsed) hint(s) used") }
                         }.font(.callout).accessibilityElement(children: .combine)
                     }
                 }

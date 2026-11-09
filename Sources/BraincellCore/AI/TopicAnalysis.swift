@@ -129,7 +129,7 @@ extension AITaskService {
             docs.append(.init(title: doc.title, characters: used, truncated: truncated))
         }
         let instructions = """
-        # Braincell topic analysis — \(course.name)
+        # Learn Anyway topic analysis — \(course.name)
 
         Propose a skill structure for this course so the student can study it. Use ONLY the course material below (if any) and the existing skills and assessments listed.
 
@@ -159,7 +159,7 @@ extension AITaskService {
         let files = [ExportFile(name: "instructions.md", content: instructions), ExportFile(name: "response_schema.json", content: TopicSchema.json),
                      ExportFile(name: "material.md", content: body),
                      ExportFile(name: "manifest.json", content: (try? enc.encode(manifest)).flatMap { String(data: $0, encoding: .utf8) } ?? "{}")]
-        let cover = "I'm attaching files for a Braincell topic analysis. Read instructions.md and follow it exactly. Reply with ONLY the JSON object described in response_schema.json. The requestId to echo back is: \(b.requestId)"
+        let cover = "I'm attaching files for a Learn Anyway topic analysis. Read instructions.md and follow it exactly. Reply with ONLY the JSON object described in response_schema.json. The requestId to echo back is: \(b.requestId)"
         b.requestText = single
         b.manifest = String(data: try JSONEncoder().encode(manifest), encoding: .utf8) ?? "{}"
         try b.update(d)

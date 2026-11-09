@@ -28,10 +28,10 @@ struct BraincellApp: App {
     }
 
     var body: some Scene {
-        WindowGroup("Braincell") {
+        WindowGroup("Learn Anyway") {
             Group {
                 if let err = model.startupError {
-                    EmptyStateView(symbol: "exclamationmark.triangle", title: "Braincell can’t start", message: err)
+                    EmptyStateView(symbol: "exclamationmark.triangle", title: "Learn Anyway can’t start", message: err)
                 } else {
                     RootView()
                 }
@@ -41,7 +41,7 @@ struct BraincellApp: App {
             .onAppear { if SnapshotRunner.isActive { Task { @MainActor in await SnapshotRunner.run(model) } } }
             .preferredColorScheme(model.appearance.colorScheme)
             .frame(minWidth: 900, minHeight: 560)
-            .alert("Braincell", isPresented: Binding(get: { model.alertMessage != nil }, set: { if !$0 { model.alertMessage = nil } })) {
+            .alert("Learn Anyway", isPresented: Binding(get: { model.alertMessage != nil }, set: { if !$0 { model.alertMessage = nil } })) {
                 Button("OK") { model.alertMessage = nil }
             } message: { Text(model.alertMessage ?? "") }
         }
@@ -64,7 +64,7 @@ struct BraincellApp: App {
         MenuBarExtra(isInserted: Binding(get: { focus.showMenuBar }, set: { if $0 != focus.showMenuBar { focus.showMenuBar = $0 } })) {
             FocusMenuBarContent().environmentObject(focus)
         } label: {
-            Label(focus.timer == nil ? "Braincell" : focus.remainingText, systemImage: "timer")
+            Label(focus.timer == nil ? "Learn Anyway" : focus.remainingText, systemImage: "timer")
         }
 
         Settings {

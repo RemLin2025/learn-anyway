@@ -25,17 +25,17 @@ struct CodeRunPanel: View {
             if !available {
                 HStack(alignment: .top) {
                     Text(runner.unavailableReason.map { pm.app.codeExecutionEnabled ? $0 : "Running code is switched off. " + $0 } ?? "\(lang.rawValue.capitalized) can’t be run on this Mac.")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
                     if !pm.app.codeExecutionEnabled { SettingsLink { Text("Turn on in Settings") }.font(.caption) }
                 }
             } else if !tests.isEmpty {
-                Text("Runs in a sandbox: no network, no files outside a temporary folder, \(Int(SandboxLimits.run.wallSeconds)) s per test.").font(.caption).foregroundStyle(.secondary)
+                Text("Runs in a sandbox: no network, no files outside a temporary folder, \(Int(SandboxLimits.run.wallSeconds)) s per test.").font(.caption).foregroundStyle(Theme.textSecondary)
             }
             if let report = pm.testReport { TestReportView(report: report) }
             if showTry {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text("Input (stdin)").font(.caption).foregroundStyle(.secondary)
-                    TextEditor(text: $stdin).font(.system(.caption, design: .monospaced)).frame(height: 60).border(Color.primary.opacity(0.15)).accessibilityLabel("Program input")
+                    Text("Input (stdin)").font(.caption).foregroundStyle(Theme.textSecondary)
+                    TextEditor(text: $stdin).font(.system(.caption, design: .monospaced)).frame(height: 60).fieldSurface().accessibilityLabel("Program input")
                     Button("Run") { Task { await pm.tryRun(stdin: stdin) } }.disabled(pm.running)
                     if let m = pm.tryMessage { Text(m).font(.caption).foregroundStyle(Theme.attention) }
                     if let o = pm.tryOutput { OutputView(output: o) }
@@ -75,7 +75,7 @@ struct TestReportView: View {
         Card {
             VStack(alignment: .leading, spacing: 6) {
                 switch report {
-                case .unavailable(let r): Label(r, systemImage: "nosign").font(.callout).foregroundStyle(.secondary)
+                case .unavailable(let r): Label(r, systemImage: "nosign").font(.callout).foregroundStyle(Theme.textSecondary)
                 case .internalError(let m): Label("The test runner failed: \(m)", systemImage: "exclamationmark.triangle").foregroundStyle(Theme.attention)
                 case .compileError(let m):
                     Label("It didn’t compile", systemImage: "xmark.octagon").foregroundStyle(Theme.attention).font(.headline)
@@ -90,11 +90,11 @@ struct TestReportView: View {
                                 Image(systemName: o.status == .passed ? "checkmark" : "xmark").foregroundStyle(o.status == .passed ? Theme.mastery : Theme.attention)
                                 Text(o.name + (o.hidden ? " (hidden)" : ""))
                                 Spacer()
-                                Text(label(o.status)).font(.caption).foregroundStyle(.secondary)
+                                Text(label(o.status)).font(.caption).foregroundStyle(Theme.textSecondary)
                             }
                             if o.status != .passed, !o.hidden {
-                                if let i = o.input, !i.isEmpty { Text("input: \(i)").font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary) }
-                                if let e = o.expected { Text("expected: \(e)").font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary) }
+                                if let i = o.input, !i.isEmpty { Text("input: \(i)").font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.textSecondary) }
+                                if let e = o.expected { Text("expected: \(e)").font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.textSecondary) }
                                 if o.status == .failed { Text("got: \(o.actual)").font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.attention) }
                                 if !o.stderr.isEmpty { Text(o.stderr).font(.system(.caption2, design: .monospaced)).foregroundStyle(Theme.attention).lineLimit(4) }
                             }

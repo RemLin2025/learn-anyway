@@ -135,7 +135,7 @@ public enum SymbolicMath {
     enum ParseFailure: Error {
         case unsupported(String), unreadable(String)
         func asResult(prefix: String) -> Result {
-            switch self { case .unsupported(let m): .unsupported("\(prefix) uses \(m), which Braincell can’t check symbolically."); case .unreadable(let m): .unreadable("\(prefix) couldn’t be read: \(m).") }
+            switch self { case .unsupported(let m): .unsupported("\(prefix) uses \(m), which Learn Anyway can’t check symbolically."); case .unreadable(let m): .unreadable("\(prefix) couldn’t be read: \(m).") }
         }
     }
 

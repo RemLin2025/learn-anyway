@@ -46,7 +46,7 @@ public struct StuckService: Sendable {
                 msg = pre.isEmpty ? "Let’s step back to the idea behind this: “\(spec.learningObjective)”. Reveal the first hint, or ask for help below." : "This question builds on other skills. Reviewing them first may help; the objective is “\(spec.learningObjective)”."
             case .dontKnowWhereToStart: msg = "Start by writing down what is given and what is being asked. \(more ? "The next prepared hint is a gentle nudge." : "No more prepared hints; ask for help below if you’re still stuck.")"
             case .stuckOnNextStep: msg = more ? "Try the next hint; each one reveals a little more." : "You’ve used all prepared hints. Re-read the statement, then ask for help below or skip and come back."
-            case .solutionNotWorking: msg = "Re-read the statement and check edge cases step by step. \(spec.type == .coding ? "Braincell can’t run code, so trace your solution by hand with a tiny example. " : "")\(more ? "A hint may point at what to check." : "")"
+            case .solutionNotWorking: msg = "Re-read the statement and check edge cases step by step. \(spec.type == .coding ? "Learn Anyway can’t run code, so trace your solution by hand with a tiny example. " : "")\(more ? "A hint may point at what to check." : "")"
             }
             return StuckGuidance(kind: kind, message: msg, hasNextHint: more, prerequisites: pre.map { (skill: $0.0, mastery: $0.1) }, objective: spec.learningObjective)
         }

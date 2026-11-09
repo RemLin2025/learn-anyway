@@ -35,8 +35,11 @@ final class AppModel: ObservableObject {
     let history: LearningHistoryService?
     let coach: CoachService?
     let stuck: StuckService?
+    /// Routes every model request (task routing, retries, usage). nil only when the database failed to open.
+    let gateway: AIGateway?
 
     @Published var selection: SidebarItem? = .home
+    lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     @Published var selectedCourseID: UUID?
     @Published var courseList: [Course] = []
     @Published var appearance: AppearanceSetting = .system
@@ -59,6 +62,8 @@ final class AppModel: ObservableObject {
     /// Course detail tab to show (set by Home's "Open plan" and by the screenshot runner).
     @Published var requestedCourseTab: String?
     @Published var snapshotMap = false
+    /// Screenshot aid: asks the root view to open the Settings window.
+    @Published var snapshotOpenSettings = false
     /// Screenshot aid: jumps the practice view to this item.
     @Published var snapshotIndex: Int?
     /// Set to open the "new AI task" sheet prefilled (e.g. Generate Similar).
@@ -84,6 +89,7 @@ final class AppModel: ObservableObject {
             history = LearningHistoryService(db: db)
             coach = CoachService(db: db)
             stuck = StuckService(db: db)
+            gateway = AIGateway(db: db, secrets: secrets)
             coachEnabled = (try? settings?.bool(.coachEnabled, default: true)) ?? true
             codeExecutionEnabled = (try? settings?.bool(.codeExecutionEnabled)) ?? false
             directAPIEnabled = (try? settings?.bool(.directAPIEnabled)) ?? false
@@ -96,8 +102,8 @@ final class AppModel: ObservableObject {
             codeFontSize = (try? settings?.int(.codeFontSize, default: 13)) ?? 13
             reload()
         } catch {
-            db = nil; self.storage = nil; courses = nil; documents = nil; settings = nil; questions = nil; ai = nil; practice = nil; evaluation = nil; progression = nil; planner = nil; reviews = nil; history = nil; coach = nil; stuck = nil
-            startupError = "Braincell couldn’t open its database: \(error.localizedDescription)\nYour data has not been modified."
+            db = nil; self.storage = nil; courses = nil; documents = nil; settings = nil; questions = nil; ai = nil; practice = nil; evaluation = nil; progression = nil; planner = nil; reviews = nil; history = nil; coach = nil; stuck = nil; gateway = nil
+            startupError = "Learn Anyway couldn’t open its database: \(error.localizedDescription)\nYour data has not been modified."
         }
     }
 
@@ -169,14 +175,14 @@ final class AppModel: ObservableObject {
         guard let db, let storage else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false
-        panel.prompt = "Choose Backup"; panel.message = "Choose a Braincell backup folder (.braincellbackup)"
+        panel.prompt = "Choose Backup"; panel.message = "Choose a Learn Anyway backup folder (.braincellbackup)"
         guard panel.runModal() == .OK, let dir = panel.url else { return }
         do {
             let m = try BackupService.validate(at: dir)          // nothing changes until this passes and you confirm
             let alert = NSAlert()
             alert.alertStyle = .warning
             alert.messageText = "Replace all current data with this backup?"
-            alert.informativeText = "Backup from \(m.createdAt.formatted(date: .abbreviated, time: .shortened)): \(m.counts["courses"] ?? 0) course(s), \(m.counts["questions"] ?? 0) question(s), \(m.counts["attempts"] ?? 0) answer(s).\n\nEverything currently in Braincell will be replaced. A safety copy of your current data is saved first (in “Safety Backups” inside Braincell’s data folder)."
+            alert.informativeText = "Backup from \(m.createdAt.formatted(date: .abbreviated, time: .shortened)): \(m.counts["courses"] ?? 0) course(s), \(m.counts["questions"] ?? 0) question(s), \(m.counts["attempts"] ?? 0) answer(s).\n\nEverything currently in Learn Anyway will be replaced. A safety copy of your current data is saved first (in “Safety Backups” inside Learn Anyway’s data folder)."
             alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Replace My Data")
             alert.buttons[1].hasDestructiveAction = true
             guard alert.runModal() == .alertSecondButtonReturn else { return }

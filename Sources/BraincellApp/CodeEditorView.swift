@@ -182,9 +182,9 @@ struct CodeWorkspaceView: View {
                 if files.count > 1 {
                     Picker("File", selection: $selected) { ForEach(files.indices, id: \.self) { Text(files[$0].name).tag($0) } }
                         .pickerStyle(.segmented).labelsHidden().frame(maxWidth: 360)
-                } else if let f = files.first { Label(f.name, systemImage: "doc.plaintext").font(.callout).foregroundStyle(.secondary) }
+                } else if let f = files.first { Label(f.name, systemImage: "doc.plaintext").font(.callout).foregroundStyle(Theme.textSecondary) }
                 Spacer()
-                if !isEditable { Badge(text: "Read-only", color: .secondary) }
+                if !isEditable { Badge(text: "Read-only", color: Theme.textSecondary) }
                 Button { controller.showFind() } label: { Label("Find", systemImage: "magnifyingglass") }.buttonStyle(.borderless)
                     .help("Find in file (⌘F)")
             }.padding(.horizontal, 10).padding(.vertical, 6)

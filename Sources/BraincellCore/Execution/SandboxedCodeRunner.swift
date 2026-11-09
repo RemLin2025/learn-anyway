@@ -93,7 +93,7 @@ public struct SandboxedCodeRunner: CodeRunner {
     }
     public var isAvailable: Bool { !languages.isEmpty }
     public var unavailableReason: String? {
-        if !FileManager.default.isExecutableFile(atPath: Self.sandboxExec) { return "macOS’s sandbox tool wasn’t found, so Braincell won’t run code." }
+        if !FileManager.default.isExecutableFile(atPath: Self.sandboxExec) { return "macOS’s sandbox tool wasn’t found, so Learn Anyway won’t run code." }
         let missing = CodeLanguage.allCases.filter { !languages.contains($0) }
         return missing.isEmpty ? nil : "No toolchain found for: \(missing.map { $0.rawValue }.joined(separator: ", ")). Install the Xcode Command Line Tools (Python, C) or a JDK (Java)."
     }

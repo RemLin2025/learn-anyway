@@ -20,9 +20,8 @@ struct QuestionBankView: View {
     var body: some View {
         VStack(spacing: 0) {
             filterBar
-            Divider()
             HSplitView {
-                list.frame(minWidth: 320, idealWidth: 400)
+                list.sidePanel().frame(minWidth: 320, idealWidth: 400)
                 Group {
                     if selection.count > 1 { bulkPanel }
                     else if let detail { QuestionPreview(detail: detail) { editing = detail }.id(detail.revision.id) }
@@ -44,12 +43,12 @@ struct QuestionBankView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) { filterControls }
+        ScrollView(.horizontal, showsIndicators: false) { filterControls }.controlStrip()
     }
 
     private var filterControls: some View {
         HStack(spacing: 8) {
-            TextField("Search questions", text: $filter.text).textFieldStyle(.roundedBorder).frame(width: 170).accessibilityLabel("Search questions")
+            SearchField(prompt: "Search questions", text: $filter.text).frame(width: 200)
             Picker("Course", selection: $filter.courseId) {
                 Text("All courses").tag(UUID?.none)
                 ForEach(courses) { Text($0.name).tag(UUID?.some($0.id)) }
@@ -89,9 +88,9 @@ struct QuestionBankView: View {
                 if !views.isEmpty { Menu("Delete View") { ForEach(views) { v in Button(v.name, role: .destructive) { model.perform { try model.questions?.deleteView(v.id) } } } } }
             } label: { Label("Views", systemImage: "bookmark") }
             Spacer()
-            Text("\(rows.count) question\(rows.count == 1 ? "" : "s")").foregroundStyle(.secondary).font(.caption)
+            Text("\(rows.count) question\(rows.count == 1 ? "" : "s")").foregroundStyle(Theme.textSecondary).font(Theme.meta)
         }
-        .padding(10)
+        .padding(Theme.Space.md)
     }
 
     private var list: some View {
@@ -108,8 +107,8 @@ struct QuestionBankView: View {
                 List(rows, selection: $selection) { r in
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
-                            Text(r.title).lineLimit(2)
-                            HStack(spacing: 4) { Badge(text: r.question.type.label); Badge(text: "D\(r.difficulty)", color: .secondary) }
+                            Text(r.title).font(.system(.body, design: .rounded, weight: .medium)).lineLimit(2)
+                            HStack(spacing: 4) { Badge(text: r.question.type.label); Badge(text: "D\(r.difficulty)", color: Theme.textSecondary) }
                         }
                         Spacer()
                         Badge(text: r.question.readiness.label, color: r.question.readiness.color)
@@ -147,7 +146,7 @@ struct QuestionBankView: View {
 
     private var bulkPanel: some View {
         VStack(spacing: 14) {
-            Text("\(selection.count) questions selected").font(.title3.weight(.semibold))
+            Text("\(selection.count) questions selected").font(Theme.sectionTitle)
             HStack {
                 Button("Archive") { model.perform { try model.questions?.setArchived(Array(selection), archived: true) }; selection = [] }
                 Button("Change Skill Tags…") {
@@ -201,14 +200,14 @@ struct SkillTagSheet: View {
     @State private var chosen: Set<UUID> = []
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Change Skill Tags").font(.headline)
-            Text("Replaces the tags on \(questionIds.count) question(s).").font(.caption).foregroundStyle(.secondary)
+            Text("Change Skill Tags").font(Theme.sectionTitle)
+            Text("Replaces the tags on \(questionIds.count) question(s).").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             List(skills) { s in
                 Toggle(s.name, isOn: Binding(get: { chosen.contains(s.id) }, set: { if $0 { chosen.insert(s.id) } else { chosen.remove(s.id) } }))
-            }.frame(height: 220)
+            }.scrollContentBackground(.hidden).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control)).frame(height: 220)
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Apply") { model.perform { try model.questions?.setSkills(questionIds: questionIds, skillIds: Array(chosen)) }; dismiss() }.keyboardShortcut(.defaultAction) }
-        }.padding(20).frame(width: 360)
+                Button("Apply") { model.perform { try model.questions?.setSkills(questionIds: questionIds, skillIds: Array(chosen)) }; dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction) }
+        }.dialogSurface(width: 380)
     }
 }
 
