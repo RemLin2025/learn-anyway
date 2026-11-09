@@ -21,3 +21,6 @@ xcuserdata/
 # Temporary files
 *.log
 *.tmp
+
+# Generated visualization files
+graphify-out/
