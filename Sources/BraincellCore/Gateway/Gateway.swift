@@ -4,7 +4,7 @@ public enum CostEstimator {
     /// (micro-USD, basis). Unknown prices give nil, never zero; local models are free of cloud charges.
     public static func estimate(model: AIModelRecord, spec: ProviderSpec?, input: Int?, output: Int?) -> (Int64?, String) {
         if spec?.isLocal == true { return (0, "local") }
-        guard let ip = model.inputPricePerM, let op = model.outputPricePerM, let i = input, let o = output else { return (nil, "unknown") }
+        guard let ip = model.effectiveInputPricePerM, let op = model.effectiveOutputPricePerM, let i = input, let o = output else { return (nil, "unknown") }
         return (Int64((Double(i) * ip + Double(o) * op).rounded()), "estimated")   // $/M tokens == µ$/token
     }
 }
@@ -50,6 +50,8 @@ public final class AIGateway: @unchecked Sendable {
     func setClock(sleep: @escaping @Sendable (TimeInterval) async -> Void, now: @escaping @Sendable () -> Date) { self.sleep = sleep; self.now = now }
 
     public func resolve(_ task: WorkflowTask) throws -> Resolution { try ModelRouter(store: store).resolve(task) }
+    /// Resolves every task from a single database read (used by the workflow canvas).
+    public func resolveAll() throws -> [String: Resolution] { try ModelRouter(store: store).resolveAll() }
 
     // MARK: Connections
 
@@ -103,8 +105,10 @@ public final class AIGateway: @unchecked Sendable {
     public func disconnect(_ c: AIConnection) throws { try secrets.delete(c.keyAccount); try store.removeConnection(c.id) }
 
     func record(_ d: DiscoveredModel, _ c: AIConnection) -> AIModelRecord {
-        AIModelRecord(id: UUID(), connectionId: c.id, modelId: d.id, displayName: d.name, capability: .llm, source: "discovered",
+        var m = AIModelRecord(id: UUID(), connectionId: c.id, modelId: d.id, displayName: d.name, capability: .llm, source: "discovered",
                       inputPricePerM: d.inputPricePerM, outputPricePerM: d.outputPricePerM, health: .untested, createdAt: now())
+        if d.inputPricePerM != nil || d.outputPricePerM != nil { m.pricedAt = now() }
+        return m
     }
 
     // MARK: Requests
@@ -131,14 +135,14 @@ public final class AIGateway: @unchecked Sendable {
     static func usd(_ v: Double) -> String { String(format: "$%.2f", v) }
 
     @discardableResult
-    public func complete(task: WorkflowTask, prompt: String, courseId: UUID? = nil, label: String? = nil) async throws -> LLMResult {
+    public func complete(task: WorkflowTask, prompt: String, courseId: UUID? = nil, label: String? = nil, system: String? = nil) async throws -> LLMResult {
         guard task.capability == .llm else { throw GatewayError.unsupported("\(task.title) isn’t an LLM task, and no adapter for \(task.capability.label) exists in this build yet.") }
         let res = try resolve(task)
         if res.manual { throw GatewayError.manualRequired("\(task.title) is set to the manual ChatGPT Bridge. Prepare the request and import the reply yourself.") }
         guard let primary = res.primary else { throw GatewayError.unavailable(res.problem ?? "No model available.") }
         try budgetCheck()
         let route = try store.route(task.id)
-        var req = LLMRequest(prompt: prompt, system: route.instruction?.isEmpty == false ? route.instruction : nil,
+        var req = LLMRequest(prompt: prompt, system: [system, route.instruction?.isEmpty == false ? route.instruction : nil].compactMap { $0 }.joined(separator: "\n\n").nilIfEmpty,
                              temperature: route.temperature, maxTokens: route.maxTokens, timeout: TimeInterval(max(5, route.timeoutSeconds)))
         req.prompt = prompt
         var last: Error = GatewayError.malformed
@@ -190,3 +194,5 @@ public final class AIGateway: @unchecked Sendable {
                                          cachedTokens: out?.cachedTokens, costMicros: cost, costBasis: basis, errorCategory: err?.category))
     }
 }
+
+public extension String { var nilIfEmpty: String? { isEmpty ? nil : self } }

@@ -2,12 +2,13 @@ import SwiftUI
 import BraincellCore
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case home = "Home", courses = "Courses", questionBank = "Question Bank", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
+    case home = "Home", courses = "Courses", library = "Library", questionBank = "Question Bank", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .home: "house"
         case .courses: "graduationcap"
+        case .library: "books.vertical"
         case .questionBank: "rectangle.stack"
         case .skills: "point.3.connected.trianglepath.dotted"
         case .insights: "chart.line.uptrend.xyaxis"
@@ -37,10 +38,23 @@ final class AppModel: ObservableObject {
     let stuck: StuckService?
     /// Routes every model request (task routing, retries, usage). nil only when the database failed to open.
     let gateway: AIGateway?
+    /// Library + course Materials (one store). Soft-deleted items are purged on launch once their seven days are up.
+    let library: LibraryService?
 
-    @Published var selection: SidebarItem? = .home
+    @Published var selection: SidebarItem? = .home { didSet { settingsOpen = false } }
+    /// Settings is a destination inside the main window (not a separate NSWindow); the section persists in @AppStorage("settingsSection").
+    @Published var settingsOpen = false
+    let updater = UpdateModel()
+    /// Set by other settings pages; the AI Workflow page selects this task when it appears.
+    @Published var pendingWorkflowTask: String?
+    func openWorkflow(task: String) { pendingWorkflowTask = task; openSettings(.workflow) }
+    func openSettings(_ section: SettingsSection? = nil) { if let section { UserDefaults.standard.set(section.rawValue, forKey: "settingsSection") }; activeSessionID = nil; settingsOpen = true }
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
+    /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
+    lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()
     @Published var selectedCourseID: UUID?
+    /// Set to ask for confirmation before deleting this course (from the Courses page or a Library course folder).
+    @Published var askDeleteCourse: UUID?
     @Published var courseList: [Course] = []
     @Published var appearance: AppearanceSetting = .system
     @Published var onboardingDismissed = false
@@ -59,11 +73,13 @@ final class AppModel: ObservableObject {
     let secrets: SecretStore = KeychainSecretStore(legacyService: "com.cramlab.api-keys")
     private lazy var sandboxRunner = SandboxedCodeRunner()
     @Published var confidencePrompts = "minimal"
-    /// Course detail tab to show (set by Home's "Open plan" and by the screenshot runner).
-    @Published var requestedCourseTab: String?
     @Published var snapshotMap = false
     /// Screenshot aid: asks the root view to open the Settings window.
     @Published var snapshotOpenSettings = false
+    /// Screenshot aids for the Courses page (which tab to show / open Recently Deleted).
+    @Published var snapshotCourseTab: String?
+    @Published var snapshotShowDeleted = false
+    @Published var snapshotLibrarySearch: String?
     /// Screenshot aid: jumps the practice view to this item.
     @Published var snapshotIndex: Int?
     /// Set to open the "new AI task" sheet prefilled (e.g. Generate Similar).
@@ -90,6 +106,8 @@ final class AppModel: ObservableObject {
             coach = CoachService(db: db)
             stuck = StuckService(db: db)
             gateway = AIGateway(db: db, secrets: secrets)
+            library = LibraryService(db: db, storage: storage)
+            _ = try? library?.purgeExpired()
             coachEnabled = (try? settings?.bool(.coachEnabled, default: true)) ?? true
             codeExecutionEnabled = (try? settings?.bool(.codeExecutionEnabled)) ?? false
             directAPIEnabled = (try? settings?.bool(.directAPIEnabled)) ?? false
@@ -102,7 +120,7 @@ final class AppModel: ObservableObject {
             codeFontSize = (try? settings?.int(.codeFontSize, default: 13)) ?? 13
             reload()
         } catch {
-            db = nil; self.storage = nil; courses = nil; documents = nil; settings = nil; questions = nil; ai = nil; practice = nil; evaluation = nil; progression = nil; planner = nil; reviews = nil; history = nil; coach = nil; stuck = nil; gateway = nil
+            db = nil; self.storage = nil; courses = nil; documents = nil; settings = nil; questions = nil; ai = nil; practice = nil; evaluation = nil; progression = nil; planner = nil; reviews = nil; history = nil; coach = nil; stuck = nil; gateway = nil; library = nil
             startupError = "Learn Anyway couldn’t open its database: \(error.localizedDescription)\nYour data has not been modified."
         }
     }
@@ -158,7 +176,7 @@ final class AppModel: ObservableObject {
     }
 
     func createBackup() {
-        guard let db, let storage else { return }
+        guard db != nil, storage != nil else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false; panel.canCreateDirectories = true
         panel.prompt = "Save Backup Here"; panel.message = "Choose where to create the backup folder"
@@ -172,7 +190,7 @@ final class AppModel: ObservableObject {
     }
 
     func restoreBackup() {
-        guard let db, let storage else { return }
+        guard db != nil, storage != nil else { return }
         let panel = NSOpenPanel()
         panel.canChooseDirectories = true; panel.canChooseFiles = false
         panel.prompt = "Choose Backup"; panel.message = "Choose a Learn Anyway backup folder (.braincellbackup)"

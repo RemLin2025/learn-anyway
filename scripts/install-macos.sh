@@ -9,6 +9,10 @@ NAME="Learn Anyway"                 # name shown in Finder, Launchpad, Spotlight
 EXE=Braincell                        # executable / module name (unchanged by design)
 STAGE=$ROOT/.build-manual/dist/$NAME.app
 
+# Stamp what this build was made from, so the app can tell when the source has moved on.
+FP=$(scripts/source-fingerprint.sh 2>/dev/null || echo "")
+rm -f "$ROOT/.build-manual/update-ready"
+
 # 1. Release build
 CONFIG=release scripts/build.sh app
 BUILT=$ROOT/.build-manual/out-release/Braincell.app/Contents
@@ -33,6 +37,8 @@ $PB -c "Add :CFBundleInfoDictionaryVersion string 6.0" "$PL"
 $PB -c "Add :CFBundleDevelopmentRegion string en" "$PL"
 $PB -c "Add :CFBundleVersion_build string 0" "$PL" >/dev/null 2>&1 && $PB -c "Delete :CFBundleVersion_build" "$PL" || true
 $PB -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" "$PL"
+$PB -c "Add :SourceRoot string $ROOT" "$PL"
+$PB -c "Add :SourceFingerprint string $FP" "$PL"
 chmod 755 "$STAGE/Contents/MacOS/$EXE"
 codesign --force --deep --sign - "$STAGE"   # ad-hoc: enough for a local, personal app
 plutil -lint "$PL" >/dev/null
@@ -43,7 +49,13 @@ DEST_DIR=/Applications
 [ -w "$DEST_DIR" ] || { DEST_DIR=$HOME/Applications; mkdir -p "$DEST_DIR"; echo "! /Applications not writable; installing to $DEST_DIR"; }
 DEST=$DEST_DIR/$NAME.app
 if pgrep -x "$EXE" >/dev/null; then
-  echo "» Quitting running $NAME"; osascript -e "tell application id \"app.braincell.Braincell\" to quit" 2>/dev/null || true
+  echo "» Quitting running $NAME"
+  if [ -n "${LEARN_ANYWAY_SELF_UPDATE:-}" ]; then
+    # Started from inside the app: tell it the build is ready and let it quit itself (no Automation permission needed).
+    touch "$ROOT/.build-manual/update-ready"
+    for _ in $(seq 1 120); do pgrep -x "$EXE" >/dev/null || break; sleep 0.5; done
+    rm -f "$ROOT/.build-manual/update-ready"
+  else osascript -e "tell application id \"app.braincell.Braincell\" to quit" 2>/dev/null || true; fi
   for _ in 1 2 3 4 5 6 7 8 9 10; do pgrep -x "$EXE" >/dev/null || break; sleep 0.5; done
   pgrep -x "$EXE" >/dev/null && { echo "✗ $NAME is still running; quit it and re-run."; exit 1; }
 fi

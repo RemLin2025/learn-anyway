@@ -26,7 +26,7 @@ build_grdb() {
   [ -f "$OUT/libGRDB.a" ] && return
   [ -d "$DEPS/GRDB.swift" ] || git clone --quiet --depth 1 --branch $GRDB_TAG https://github.com/groue/GRDB.swift.git "$DEPS/GRDB.swift"
   echo "» GRDB $GRDB_TAG (cached after first build)"
-  "${SWIFTC[@]}" -swift-version 6 -parse-as-library -wmo -module-name GRDB -emit-module -emit-library -static \
+  "${SWIFTC[@]}" -suppress-warnings -swift-version 6 -parse-as-library -wmo -module-name GRDB -emit-module -emit-library -static \
     -D SQLITE_ENABLE_FTS5 -D SQLITE_ENABLE_SNAPSHOT -I "$DEPS/GRDB.swift/Sources/GRDBSQLite" \
     -emit-module-path "$OUT/GRDB.swiftmodule" -o "$OUT/libGRDB.a" \
     $(find "$DEPS/GRDB.swift/GRDB" -name '*.swift')

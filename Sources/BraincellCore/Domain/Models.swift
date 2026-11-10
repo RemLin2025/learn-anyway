@@ -84,7 +84,7 @@ public struct SkillRelation: Codable, Sendable, Identifiable, Hashable, Fetchabl
 }
 
 public enum DocumentKind: String, Codable, Sendable, DatabaseValueConvertible {
-    case pdf, text, pasted
+    case pdf, text, pasted, image, video, other
 }
 
 public enum ExtractionStatus: String, Codable, Sendable, DatabaseValueConvertible {
@@ -94,14 +94,20 @@ public enum ExtractionStatus: String, Codable, Sendable, DatabaseValueConvertibl
     case partial
     /// Nothing usable could be extracted. The original file is still preserved.
     case failed
+    /// Images, videos and other files that have no text to extract.
+    case notApplicable
 }
 
 public struct Document: Codable, Sendable, Identifiable, Hashable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "documents"
     public var id: UUID
-    public var courseId: UUID
+    /// The owning course, or nil for a file that lives directly in the global Library.
+    public var courseId: UUID?
+    public var folderId: UUID?
     public var title: String
     public var originalFilename: String
+    /// Display name with extension; renaming changes this (and `title`), never the stored copy.
+    public var name: String
     /// Path relative to the managed storage root.
     public var storedPath: String
     public var sha256: String
@@ -112,6 +118,11 @@ public struct Document: Codable, Sendable, Identifiable, Hashable, FetchableReco
     public var extractionMethod: String
     public var lowContentPageCount: Int
     public var importedAt: Date
+    public var modifiedAt: Date
+    public var favorite: Bool
+    public var deletedAt: Date?
+    public var purgeAfter: Date?
+    public var deletedWith: UUID?
 }
 
 public struct DocumentChunk: Codable, Sendable, Identifiable, Hashable, FetchableRecord, PersistableRecord {

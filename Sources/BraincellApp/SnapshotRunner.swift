@@ -1,4 +1,5 @@
 import SwiftUI
+import CoreText
 import AppKit
 import BraincellCore
 
@@ -24,6 +25,9 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
+        if ProcessInfo.processInfo.environment["BRAINCELL_LIBRARY_SNAP"] != nil { await libraryScenario(model, dir: dir); NSApp.terminate(nil); return }
+        if ProcessInfo.processInfo.environment["BRAINCELL_BENCH"] != nil { await Bench.run(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_SETTINGS_SNAP"] != nil { await settingsScenario(model, dir: dir); NSApp.terminate(nil); return }
         func shot(_ name: String) async {
             NSLog("snapshot: shot %@", name)
@@ -55,6 +59,117 @@ enum SnapshotRunner {
         NSApp.terminate(nil)
     }
 
+    /// Drives the real Home chat against a local scripted model server (BRAINCELL_CHAT_PORT) and screenshots each stage. Only against BRAINCELL_DATA_DIR.
+    static func chatScenario(_ model: AppModel, dir: URL) async {
+        guard let chat = model.chat, let gw = model.gateway, let courses = model.courses, let docs = model.documents, let port = ProcessInfo.processInfo.environment["BRAINCELL_CHAT_PORT"],
+              ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        var log = ""
+        func note(_ s: String) { log += s + "\n"; try? log.write(to: dir.appendingPathComponent("chat-log.txt"), atomically: true, encoding: .utf8) }
+        func shotWin(_ name: String, wait: UInt64 = 1_200_000_000) async {
+            try? await Task.sleep(nanoseconds: wait)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.title != "Settings" })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        func until(_ secs: Double, _ cond: @MainActor () -> Bool) async -> Bool { let end = Date().addingTimeInterval(secs); while Date() < end { if cond() { return true }; try? await Task.sleep(nanoseconds: 250_000_000) }; return cond() }
+        func pendingApproval() -> UUID? {
+            chat.messages.last(where: { $0.kind == .approval }).flatMap { m in (try? JSONSerialization.jsonObject(with: Data((m.payload ?? "{}").utf8))) as? [String: String] }
+                .flatMap { $0["status"] == "proposed" ? $0["actionId"].flatMap(UUID.init) : nil }
+        }
+        do {
+            let (c, n) = try await gw.connect(providerId: "custom", name: "Local scripted model", baseURL: "http://127.0.0.1:\(port)/v1", apiKey: "test")
+            try gw.store.setDefault(.llm, connection: c.id, model: "scripted-model"); note("connected, \(n) model(s)")
+        } catch { note("connect failed: \(error.localizedDescription)"); return }
+        model.aiConfig?.reload()
+        let cal = Calendar.current
+        let course = try? courses.createCourse(name: "COMP301 Midterm 2 (Frank)")
+        if let course {
+            let friday = cal.nextDate(after: Date(), matching: DateComponents(weekday: 6), matchingPolicy: .nextTime)
+            _ = try? courses.addAssessment(courseId: course.id, name: "Midterm 2", kind: .midterm, deadline: friday, isCumulative: true)
+            _ = try? courses.addSkill(courseId: course.id, name: "Pointers")
+            let f = dir.appendingPathComponent("notes.txt"); try? "Lecture 4: Pointers\n\nA pointer stores a memory address. The dereference operator * reads the value at that address. malloc from stdlib.h allocates heap memory.".write(to: f, atomically: true, encoding: .utf8)
+            _ = try? docs.importFile(at: f, courseId: course.id)
+        }
+        model.reload(); model.selection = .home; chat.newChat()
+        await shotWin("chat-1-empty")
+        chat.draft = SuggestionGrid.all[0].prompt
+        await shotWin("chat-2-suggestion-in-composer", wait: 400_000_000)
+        chat.draft = "Help me prepare for my COMP301 Midterm 2 next Friday. I want a study plan and practice problems."
+        chat.send()
+        note("sent; waiting for approval: \(await until(40) { pendingApproval() != nil })")
+        await shotWin("chat-3-approval")
+        if let a = pendingApproval() { chat.approve(a) }
+        note("preview: \(await until(60) { chat.messages.contains { $0.kind == .preview } && !chat.thinking })")
+        await shotWin("chat-4-preview")
+        if let gid = chat.messages.last(where: { $0.kind == .preview }).flatMap({ m in ((try? JSONSerialization.jsonObject(with: Data((m.payload ?? "{}").utf8))) as? [String: String])?["actionId"].flatMap(UUID.init) }) { chat.savePreview(gid) }
+        _ = await until(20) { (try? model.questions?.list({ var f = QuestionFilter(); f.courseId = course?.id; return f }()).count) == 3 }
+        note("questions in bank after save: \((try? model.questions?.list({ var f = QuestionFilter(); f.courseId = course?.id; return f }()).count) ?? -1)")
+        chat.draft = "Please rebuild my plan now that the questions are saved."; chat.send()
+        _ = await until(40) { !chat.thinking && chat.messages.last?.role == .assistant && chat.messages.last?.kind == .text }
+        await shotWin("chat-5-plan")
+        note("plans: \((try? chat.store.plans().count) ?? -1), conversations: \(chat.conversations.count)")
+        chat.newChat(); chat.draft = "Help me prepare for my BIO101 exam."; chat.send()
+        note("bio approval: \(await until(40) { pendingApproval() != nil })")
+        await shotWin("chat-6-create-course")
+        if let a = pendingApproval() { chat.approve(a) }
+        _ = await until(40) { !chat.thinking && chat.messages.last?.role == .assistant && chat.messages.last?.kind == .text }
+        note("courses: \(model.courseList.map(\.name))")
+        model.reload()
+        await shotWin("chat-7-created")
+        note("done")
+    }
+
+    /// Library screenshots from synthetic files. Only with BRAINCELL_LIBRARY_SNAP and BRAINCELL_DATA_DIR (never your real library).
+    static func libraryScenario(_ model: AppModel, dir: URL) async {
+        guard let lib = model.library, let courses = model.courses, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        let src = dir.appendingPathComponent("src", isDirectory: true); let fm = FileManager.default
+        func png(_ path: String, _ r: CGFloat, _ g: CGFloat, _ b: CGFloat) {
+            let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: 320, pixelsHigh: 220, bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
+            NSGraphicsContext.saveGraphicsState(); NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+            NSGradient(starting: NSColor(calibratedRed: r, green: g, blue: b, alpha: 1), ending: NSColor(calibratedRed: b, green: r, blue: g, alpha: 1))!.draw(in: NSRect(x: 0, y: 0, width: 320, height: 220), angle: 35)
+            NSGraphicsContext.restoreGraphicsState(); try? rep.representation(using: .png, properties: [:])?.write(to: u)
+        }
+        func pdf(_ path: String, _ text: String) {
+            let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+            var box = CGRect(x: 0, y: 0, width: 612, height: 792); let ctx = CGContext(u as CFURL, mediaBox: &box, nil)!
+            ctx.beginPDFPage(nil); let attr = NSAttributedString(string: text, attributes: [.font: CTFontCreateWithName("Helvetica-Bold" as CFString, 28, nil)])
+            ctx.textPosition = CGPoint(x: 60, y: 700); CTLineDraw(CTLineCreateWithAttributedString(attr), ctx); ctx.endPDFPage(); ctx.closePDF()
+        }
+        func txt(_ path: String, _ s: String) { let u = src.appendingPathComponent(path); try? fm.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true); try? s.write(to: u, atomically: true, encoding: .utf8) }
+        guard let a = try? courses.createCourse(name: "COMP211"), let b = try? courses.createCourse(name: "COMP301 Midterm"), let old = try? courses.createCourse(name: "STAT435") else { return }
+        pdf("Lecture Notes/Week 1 Pointers.pdf", "Pointers"); pdf("Lecture Notes/Week 2 Memory.pdf", "Memory"); png("Lecture Notes/Images/stack diagram.png", 0.3, 0.5, 0.9); png("Lecture Notes/Images/heap.png", 0.9, 0.4, 0.3)
+        txt("Lecture Notes/syllabus.md", "# Syllabus\nWeek 1 ...")
+        _ = lib.importFolder(src.appendingPathComponent("Lecture Notes"), into: .course(a.id))
+        pdf("Slides.pdf", "UML Relationships"); png("whiteboard.png", 0.2, 0.7, 0.5); txt("Code Examples.txt", "int main() { return 0; }")
+        _ = lib.importFiles([src.appendingPathComponent("Slides.pdf"), src.appendingPathComponent("whiteboard.png"), src.appendingPathComponent("Code Examples.txt")], into: .course(b.id))
+        let research = try? lib.createFolder("Research", in: .root); _ = try? lib.createFolder("References", in: .root)
+        pdf("Paper.pdf", "A paper"); png("figure.png", 0.8, 0.8, 0.2); txt("reading list.txt", "1. Foo\n2. Bar")
+        _ = lib.importFiles([src.appendingPathComponent("Paper.pdf"), src.appendingPathComponent("figure.png"), src.appendingPathComponent("reading list.txt")], into: research.map { .folder($0) } ?? .root)
+        _ = lib.importFiles([src.appendingPathComponent("figure.png")], into: .root)
+        if let first = try? lib.list(.root).first(where: { $0.name == "figure.png" }) { try? lib.setFavorite([first.ref], true) }
+        pdf("old.pdf", "Old"); _ = lib.importFiles([src.appendingPathComponent("old.pdf")], into: .course(old.id)); try? lib.deleteCourse(old.id)
+        model.reload()
+        func shotWin(_ name: String) async {
+            try? await Task.sleep(nanoseconds: 3_000_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.title != "Settings" })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        UserDefaults.standard.set("grid", forKey: "libraryLayout"); model.selection = .library
+        await shotWin("lib-1-root-grid")
+        UserDefaults.standard.set("list", forKey: "libraryLayout"); await shotWin("lib-2-root-list")
+        UserDefaults.standard.set("grid", forKey: "libraryLayout")
+        model.snapshotCourseTab = "materials"; model.selectedCourseID = a.id; model.selection = .courses
+        await shotWin("lib-3-course-materials")
+        model.snapshotLibrarySearch = "e"; model.selection = .library
+        await shotWin("lib-4-search")
+        model.snapshotLibrarySearch = ""; model.snapshotShowDeleted = true
+        await shotWin("lib-5-recently-deleted")
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.title != "Settings" && $0.contentView != nil }) { model.snapshotShowDeleted = false; w.setContentSize(NSSize(width: 900, height: 600)) }
+        UserDefaults.standard.set("grid", forKey: "libraryLayout"); model.snapshotLibrarySearch = "e"
+        await shotWin("lib-6-narrow")
+        UserDefaults.standard.removeObject(forKey: "libraryLayout")
+    }
+
     /// Screenshots of the four AI settings pages with synthetic data (never real keys). Only with BRAINCELL_SETTINGS_SNAP, and only against BRAINCELL_DATA_DIR.
     static func settingsScenario(_ model: AppModel, dir: URL) async {
         guard let gw = model.gateway, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
@@ -71,10 +186,30 @@ enum SnapshotRunner {
             try? gw.store.record(AIRequestRecord(id: UUID(), ts: t, connectionId: c.id, providerId: "openrouter", modelId: k % 2 == 0 ? "openai/gpt-4o-mini" : "deepseek/deepseek-chat", capability: .llm, task: k % 2 == 0 ? "quizGeneration" : "answerEvaluation", courseId: nil,
                 status: d == 3 && k == 0 ? "failed" : "success", latencyMs: 900 + d * 40, inputTokens: 1800 + d * 90, outputTokens: 600 + k * 120, cachedTokens: nil, costMicros: k % 2 == 0 ? Int64(2400 + d * 100) : nil, costBasis: k % 2 == 0 ? "estimated" : "unknown", errorCategory: d == 3 && k == 0 ? "rate_limit" : nil))
         } }
+        for i in 0..<450 {            // a large catalog, like OpenRouter's, to check scrolling and filtering
+            try? gw.store.save(AIModelRecord(connectionId: c.id, modelId: "vendor\(i % 12)/model-\(i)-with-a-fairly-long-name", displayName: "Vendor \(i % 12) Model \(i) Long Display Name", capability: .llm, source: "discovered", inputPricePerM: i % 9 == 0 ? nil : Double(i % 30) * 0.1, outputPricePerM: i % 9 == 0 ? nil : Double(i % 30) * 0.4))
+        }
         model.aiConfig?.reload()
-        model.snapshotOpenSettings = true
+        let wfOnly = ProcessInfo.processInfo.environment["BRAINCELL_WF_ONLY"]
+        if let wfOnly {                                      // workflow-page shots at several window sizes, optionally pre-expanded
+            UserDefaults.standard.set(SettingsSection.workflow.rawValue, forKey: "settingsSection"); UserDefaults.standard.set("map", forKey: "wf.mode")
+            UserDefaults.standard.set(wfOnly.split(separator: ",").map(String.init).filter { !$0.isEmpty }, forKey: "wf.expanded")
+            UserDefaults.standard.removeObject(forKey: "wf.cam")
+        }
+        model.openSettings()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
-        guard let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.identifier?.rawValue.contains("Settings") == true || $0.title.contains("General")) }) else { NSLog("snapshot: no settings window"); return }
+        guard let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { NSLog("snapshot: no window"); return }
+        NSLog("snapshot: windows=%d (Settings is in-app, expect 1 content window)", NSApp.windows.filter { $0.isVisible && $0.contentView != nil && !($0 is NSPanel) && $0.frame.width > 300 }.count)
+        if wfOnly != nil {
+            for (name, size) in [("wide", NSSize(width: 1500, height: 900)), ("default", NSSize(width: 1180, height: 780)), ("min", NSSize(width: 980, height: 640))] {
+                w.setContentSize(size)
+                try? await Task.sleep(nanoseconds: 1_800_000_000)
+                guard let v = w.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { continue }
+                v.cacheDisplay(in: v.bounds, to: rep)
+                try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("wf-\(name).png"))
+            }
+            return
+        }
         w.setContentSize(NSSize(width: 1180, height: 780))
         for (i, s) in SettingsSection.allCases.enumerated() {
             UserDefaults.standard.set(s.rawValue, forKey: "settingsSection")
@@ -165,8 +300,8 @@ enum SnapshotRunner {
         }
         model.reload(); model.selection = .home; await shot("30-home-adaptive")
 
-        model.selectedCourseID = c.id; model.requestedCourseTab = "plan"; model.selection = .courses
-        await shot("31-plan")
+        model.selectedCourseID = c.id; model.selection = .library
+        await shot("31-library")
 
         let two: [String] = ["Which call removes", "Trace the iterator loop"]
         let ids = two.compactMap(qid)
@@ -292,7 +427,7 @@ enum SnapshotRunner {
         var failures = 0
         func check(_ ok: Bool, _ what: String) { log.append((ok ? "PASS " : "FAIL ") + what); if !ok { failures += 1 } }
         func sleep(_ s: Double) async { try? await Task.sleep(nanoseconds: UInt64(s * 1_000_000_000)) }
-        guard let c = model.courseList.first, let p = model.practice, let rows = try? model.questions?.list(QuestionFilter()), let ev = model.evaluation else { log.append("FAIL setup"); return }
+        guard let c = model.courseList.first, let p = model.practice, let rows = try? model.questions?.list(QuestionFilter()), model.evaluation != nil else { log.append("FAIL setup"); return }
         func qid(_ t: String) -> UUID { rows.first { $0.title.hasPrefix(t) }!.id }
 
         // ── PracticeModel: the flow behind the practice screen's buttons ───────────────────────────────

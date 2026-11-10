@@ -80,7 +80,7 @@ final class MockTransport: HTTPTransport, @unchecked Sendable {
 
     @Test func httpFailuresMapToClearErrorsAndImportNothing() async throws {
         let s = try setup()
-        func err(_ code: Int, _ msg: String) -> Data { try! JSONSerialization.data(withJSONObject: ["type": "error", "error": ["type": "x", "message": msg]]) }
+        @Sendable func err(_ code: Int, _ msg: String) -> Data { try! JSONSerialization.data(withJSONObject: ["type": "error", "error": ["type": "x", "message": msg]]) }
         for (code, expect) in [(401, "rejected the key"), (429, "rate limiting"), (500, "problem"), (400, "refused")] {
             let t = MockTransport { _ in (err(code, "boom"), code) }
             do { _ = try await service(s, t).send(batchId: s.batch.id); Issue.record("should have thrown for \(code)") }

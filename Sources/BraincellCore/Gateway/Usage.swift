@@ -10,12 +10,15 @@ public struct UsageRange: Sendable, Equatable {
 
 public struct UsageTotals: Sendable, Equatable {
     public var requests = 0, succeeded = 0, failed = 0
-    public var inputTokens = 0, outputTokens = 0
+    public var inputTokens = 0, outputTokens = 0, cachedTokens = 0
+    /// Successful requests whose provider reported no token counts at all (shown as unknown, never as zero).
+    public var unreportedTokenRequests = 0
     public var knownCostMicros: Int64 = 0
     public var unknownCostRequests = 0
     public var avgLatencyMs = 0
     public var totalTokens: Int { inputTokens + outputTokens }
     public var costIsComplete: Bool { unknownCostRequests == 0 }
+    public init() {}
 }
 public struct UsageGroup: Identifiable, Sendable, Equatable {
     public var id: String { key }
@@ -79,6 +82,67 @@ public struct UsageService: Sendable {
             m[key] = x
         }
         return m.values.sorted { $0.requests > $1.requests }
+    }
+
+    // MARK: SQL aggregates (no request rows are loaded into memory)
+
+    private static func whereClause(_ r: UsageRange, capability: Capability? = nil, status: String? = nil, provider: String? = nil, model: String? = nil) -> (String, StatementArguments) {
+        var c: [String] = [], a: [DatabaseValueConvertible] = []
+        if let f = r.from { c.append("ts >= ?"); a.append(f) }
+        if let t = r.to { c.append("ts <= ?"); a.append(t) }
+        if let capability { c.append("capability = ?"); a.append(capability.rawValue) }
+        if let status { c.append(status == "failed" ? "status != 'success'" : "status = ?"); if status != "failed" { a.append(status) } }
+        if let provider { c.append("providerId = ?"); a.append(provider) }
+        if let model { c.append("modelId = ?"); a.append(model) }
+        return (c.isEmpty ? "" : "WHERE " + c.joined(separator: " AND "), StatementArguments(a))
+    }
+
+    public func totals(_ r: UsageRange, capability: Capability? = nil, status: String? = nil, provider: String? = nil, model: String? = nil) throws -> UsageTotals {
+        let (w, args) = Self.whereClause(r, capability: capability, status: status, provider: provider, model: model)
+        return try store.db.read { db in
+            let row = try Row.fetchOne(db, sql: """
+                SELECT COUNT(*) n, COALESCE(SUM(status = 'success'),0) ok, COALESCE(SUM(inputTokens),0) i, COALESCE(SUM(outputTokens),0) o, COALESCE(SUM(cachedTokens),0) c,
+                       COALESCE(SUM(costMicros),0) cost, COALESCE(SUM(status = 'success' AND costMicros IS NULL),0) unk,
+                       COALESCE(SUM(status = 'success' AND inputTokens IS NULL AND outputTokens IS NULL),0) nt, COALESCE(CAST(AVG(latencyMs) AS INTEGER),0) lat
+                FROM ai_requests \(w)
+                """, arguments: args)!
+            var t = UsageTotals()
+            t.requests = row["n"]; t.succeeded = row["ok"]; t.failed = t.requests - t.succeeded
+            t.inputTokens = row["i"]; t.outputTokens = row["o"]; t.cachedTokens = row["c"]
+            t.knownCostMicros = row["cost"]; t.unknownCostRequests = row["unk"]; t.unreportedTokenRequests = row["nt"]; t.avgLatencyMs = row["lat"]
+            return t
+        }
+    }
+
+    public enum Dimension: String, Sendable { case provider = "providerId", model = "modelId", task = "task" }
+    public struct Slice: Identifiable, Sendable, Equatable { public var id: String { key }; public var key: String; public var requests = 0, tokens = 0, errors = 0 }
+
+    /// Top slices by request count along one dimension, aggregated in SQL.
+    public func slices(_ r: UsageRange, by d: Dimension, limit: Int = 8) throws -> [Slice] {
+        let (w, args) = Self.whereClause(r)
+        return try store.db.read { db in
+            try Row.fetchAll(db, sql: "SELECT \(d.rawValue) k, COUNT(*) n, COALESCE(SUM(COALESCE(inputTokens,0)+COALESCE(outputTokens,0)),0) t, COALESCE(SUM(status != 'success'),0) e FROM ai_requests \(w) GROUP BY k ORDER BY n DESC LIMIT \(limit)", arguments: args)
+                .map { Slice(key: $0["k"], requests: $0["n"], tokens: $0["t"], errors: $0["e"]) }
+        }
+    }
+
+    /// Newest-first page of the request log with filters applied in SQL.
+    public func page(_ r: UsageRange, capability: Capability? = nil, status: String? = nil, provider: String? = nil, model: String? = nil, limit: Int = 300) throws -> [AIRequestRecord] {
+        let (w, args) = Self.whereClause(r, capability: capability, status: status, provider: provider, model: model)
+        return try store.db.read { try AIRequestRecord.fetchAll($0, sql: "SELECT * FROM ai_requests \(w) ORDER BY ts DESC LIMIT \(limit)", arguments: args) }
+    }
+
+    public func distinctValues(_ column: Dimension) throws -> [String] {
+        try store.db.read { try String.fetchAll($0, sql: "SELECT DISTINCT \(column.rawValue) FROM ai_requests ORDER BY 1") }
+    }
+
+    public func dailyTotals(_ r: UsageRange) throws -> [DayUsage] {
+        let (w, args) = Self.whereClause(r)
+        return try store.db.read { db in
+            let cal = Calendar.current, f = DateFormatter(); f.dateFormat = "yyyy-MM-dd"; f.calendar = cal
+            return try Row.fetchAll(db, sql: "SELECT strftime('%Y-%m-%d', ts, 'localtime') d, COUNT(*) n, COALESCE(SUM(COALESCE(inputTokens,0)+COALESCE(outputTokens,0)),0) t, COALESCE(SUM(costMicros),0) c FROM ai_requests \(w) GROUP BY d ORDER BY d", arguments: args)
+                .compactMap { row in f.date(from: row["d"] as String).map { DayUsage(day: $0, requests: row["n"], tokens: row["t"], costMicros: row["c"]) } }
+        }
     }
 
     public func spend(since: Date) throws -> Double { Double(try store.db.read { try Int64.fetchOne($0, sql: "SELECT COALESCE(SUM(costMicros),0) FROM ai_requests WHERE ts >= ?", arguments: [since]) ?? 0 }) / 1_000_000 }

@@ -40,6 +40,7 @@ public struct WorkflowTask: Identifiable, Hashable, Sendable {
     }
 
     public static let all: [WorkflowTask] = [
+        t("chatAssistant", "Chat Assistant", .llm, .core, "The Home chat: answers questions and calls app tools."),
         t("planningAgent", "Planning Agent", .llm, .core, "Decides how a larger request is broken into steps."),
         t("courseOutline", "Course Outline", .llm, .core, "Drafts a course outline from your sources.", after: ["sourceSummarization"]),
         t("learningObjectives", "Learning Objectives", .llm, .core, "Writes measurable objectives for each part.", after: ["courseOutline"]),

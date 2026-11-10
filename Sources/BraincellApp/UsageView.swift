@@ -11,9 +11,21 @@ struct UsageView: View {
     @State private var span: Span = .d30
     @State private var from = Calendar.current.date(byAdding: .day, value: -30, to: Date())!
     @State private var to = Date()
-    @State private var rows: [AIRequestRecord] = []
+    @State private var rows: [AIRequestRecord] = []          // newest 300 matching the history filters, never the whole log
+    @State private var totals = UsageTotals()
+    @State private var byProvider: [UsageService.Slice] = []
+    @State private var byModel: [UsageService.Slice] = []
+    @State private var byTask: [UsageService.Slice] = []
+    @State private var days: [DayUsage] = []
+    @State private var providers: [String] = []
+    @State private var models: [String] = []
+    @State private var openRequests = false
+    @State private var openTokens = false
     @State private var capFilter: Capability?
     @State private var statusFilter = "all"
+    @State private var providerFilter = ""
+    @State private var modelFilter = ""
+    @State private var picked: UUID?
     @State private var sortOrder = [KeyPathComparator(\AIRequestRecord.ts, order: .reverse)]
     @State private var budget = BudgetSettings()
     @State private var budgetText = (d: "", m: "", r: "", n: "")
@@ -26,7 +38,6 @@ struct UsageView: View {
         case .custom: UsageRange(from: Calendar.current.startOfDay(for: from), to: Calendar.current.date(byAdding: .day, value: 1, to: Calendar.current.startOfDay(for: to)))
         }
     }
-    private var filtered: [AIRequestRecord] { rows.filter { (capFilter == nil || $0.capability == capFilter) && (statusFilter == "all" || $0.status == statusFilter) } }
     private var u: UsageService { cfg.gw.usage }
 
     var body: some View {
@@ -34,20 +45,23 @@ struct UsageView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: Theme.Space.lg) {
                     controls
-                    tiles
-                    if rows.isEmpty { Notice(text: "No AI requests yet in this period. Usage appears here once a task is sent through a connected provider. Manual ChatGPT Bridge work is never counted.") }
-                    charts
-                    modelTable
+                    primaryCards
+                    if totals.requests == 0 { Notice(text: "No AI requests yet in this period. Usage appears here once a task is sent through a connected provider. Manual ChatGPT Bridge work is never counted.") }
                     historyTable
-                    budgetCard
+                    DisclosureGroup("Budget controls") { budgetCard.padding(.top, Theme.Space.sm) }.font(Theme.cardTitle)
                 }.padding(Theme.Space.xl).frame(maxWidth: 1100, alignment: .leading).frame(maxWidth: .infinity)
             }
         }
-        .task(id: "\(cfg.rev)-\(span.rawValue)-\(from)-\(to)") { load() }
+        .task(id: "\(cfg.rev)-\(span.rawValue)-\(from)-\(to)-\(capFilter?.rawValue ?? "")-\(statusFilter)-\(providerFilter)-\(modelFilter)") { load() }
     }
 
     private func load() {
-        rows = (try? u.requests(range)) ?? []
+        let st = statusFilter == "all" ? nil : statusFilter
+        rows = (try? u.page(range, capability: capFilter, status: st, provider: providerFilter.isEmpty ? nil : providerFilter, model: modelFilter.isEmpty ? nil : modelFilter)) ?? []
+        totals = (try? u.totals(range)) ?? UsageTotals()
+        byProvider = (try? u.slices(range, by: .provider)) ?? []; byModel = (try? u.slices(range, by: .model)) ?? []; byTask = (try? u.slices(range, by: .task)) ?? []
+        days = (try? u.dailyTotals(range)) ?? []
+        providers = (try? u.distinctValues(.provider)) ?? []; models = (try? u.distinctValues(.model)) ?? []
         courseNames = (try? cfg.gw.store.db.read { db in Dictionary(uniqueKeysWithValues: try Row.fetchAll(db, sql: "SELECT id, name FROM courses").map { ($0["id"] as UUID, $0["name"] as String) }) }) ?? [:]
         budget = BudgetSettings.load(cfg.gw.settings)
         budgetText = (budget.daily.map { String($0) } ?? "", budget.monthly.map { String($0) } ?? "", budget.perRequest.map { String($0) } ?? "", budget.maxRequestsPerDay.map { String($0) } ?? "")
@@ -63,94 +77,92 @@ struct UsageView: View {
             Picker("Period", selection: $span) { ForEach(Span.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 170)
             if span == .custom { DatePicker("From", selection: $from, displayedComponents: .date).labelsHidden(); Text("to"); DatePicker("To", selection: $to, displayedComponents: .date).labelsHidden() }
             Spacer()
-            Button("Export Summary CSV…") { export(u.summaryCSV(filtered), "usage-summary.csv") }
-            Button("Export History CSV…") { export(u.historyCSV(filtered), "usage-history.csv") }
+            Menu("Export") {
+                Button("Summary CSV (totals per model)…") { export(u.summaryCSV((try? u.requests(range)) ?? []), "usage-summary.csv") }
+                Button("Detailed history CSV (one row per request)…") { export(u.historyCSV((try? u.requests(range, capability: capFilter, status: statusFilter == "all" ? nil : statusFilter)) ?? []), "usage-history.csv") }
+            }.menuStyle(.borderlessButton).fixedSize().help("Summary: one row per model. Detailed: one row per request. Neither contains prompts, replies or keys.")
         }
     }
 
-    private var tiles: some View {
-        let t = u.totals(rows)
-        let avg = t.avgLatencyMs
-        return LazyVGrid(columns: [GridItem(.adaptive(minimum: 170), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
-            tile("Total Requests", "\(t.requests)")
-            tile("Total Tokens", t.totalTokens.formatted())
-            tile("Input Tokens", t.inputTokens.formatted()); tile("Output Tokens", t.outputTokens.formatted())
-            tile("Estimated Cost", t.unknownCostRequests == t.succeeded && t.succeeded > 0 ? "Cost Unknown" : money(t.knownCostMicros, complete: t.costIsComplete),
-                 note: t.costIsComplete ? "Estimate only" : "\(t.unknownCostRequests) request(s) have no price")
-            tile("Successful", "\(t.succeeded)"); tile("Failed", "\(t.failed)")
-            tile("Avg Latency", avg >= 1000 ? String(format: "%.1f s", Double(avg) / 1000) : "\(avg) ms")
-        }
-    }
-
-    private func tile(_ title: String, _ value: String, note: String? = nil) -> some View {
-        Card(padding: Theme.Space.md) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text(title).font(Theme.meta).foregroundStyle(Theme.textSecondary)
-                Text(value).font(.system(.title2, design: .rounded, weight: .semibold)).monospacedDigit().minimumScaleFactor(0.7).lineLimit(1)
-                if let note { Text(note).font(.system(size: 10)).foregroundStyle(Theme.textSecondary) }
+    private var primaryCards: some View {
+        let t = totals
+        return VStack(alignment: .leading, spacing: Theme.Space.md) {
+            HStack(alignment: .top, spacing: Theme.Space.md) {
+                metric("Total Requests", "\(t.requests)", open: $openRequests)
+                metric("Total Tokens", t.totalTokens.formatted(), open: $openTokens)
             }
-        }.accessibilityElement(children: .combine)
-    }
-
-    // MARK: Charts
-
-    @ViewBuilder private var charts: some View {
-        if !rows.isEmpty {
-            let days = u.byDay(rows)
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 420), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
-                chartCard("Daily Token Usage") { Chart(days) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Tokens", $0.tokens)).foregroundStyle(Theme.accent) } }
-                chartCard("Daily Estimated Spend (known costs)") { Chart(days) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("USD", Double($0.costMicros) / 1_000_000)).foregroundStyle(Theme.mastery) } }
-                chartCard("Requests Over Time") { Chart(days) { LineMark(x: .value("Day", $0.day, unit: .day), y: .value("Requests", $0.requests)); PointMark(x: .value("Day", $0.day, unit: .day), y: .value("Requests", $0.requests)) }.foregroundStyle(Theme.accent) }
-                groupChart("Usage by Capability", u.grouped(rows, by: .capability))
-                groupChart("Usage by Provider", u.grouped(rows, by: .provider))
-                groupChart("Usage by Model", u.grouped(rows, by: .model))
+            if openRequests {
+                Card {
+                    VStack(alignment: .leading, spacing: Theme.Space.md) {
+                        HStack(spacing: Theme.Space.xl) { stat("Successful", "\(t.succeeded)"); stat("Failed", "\(t.failed)"); stat("Avg latency", t.requests == 0 ? "—" : (t.avgLatencyMs >= 1000 ? String(format: "%.1f s", Double(t.avgLatencyMs) / 1000) : "\(t.avgLatencyMs) ms")) }
+                        breakdown("By provider", byProvider.map { ($0.key, "\($0.requests)", Double($0.requests)) })
+                        breakdown("By model", byModel.map { ($0.key, "\($0.requests)", Double($0.requests)) })
+                        breakdown("By task", byTask.map { (WorkflowTask.find($0.key)?.title ?? $0.key, "\($0.requests)", Double($0.requests)) })
+                        if days.count > 1 { Chart(days) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Requests", $0.requests)).foregroundStyle(Theme.accent) }.frame(height: 110) }
+                    }
+                }
+            }
+            if openTokens {
+                Card {
+                    VStack(alignment: .leading, spacing: Theme.Space.md) {
+                        HStack(spacing: Theme.Space.xl) {
+                            stat("Input", t.inputTokens.formatted()); stat("Output", t.outputTokens.formatted())
+                            stat("Cached", t.cachedTokens == 0 ? "None reported" : t.cachedTokens.formatted())
+                            stat("Estimated cost", t.unknownCostRequests == t.succeeded && t.succeeded > 0 ? "Unknown" : money(t.knownCostMicros, complete: t.costIsComplete), note: t.costIsComplete ? "Estimate, not an invoice" : "\(t.unknownCostRequests) request(s) have no price")
+                        }
+                        if t.unreportedTokenRequests > 0 { Text("\(t.unreportedTokenRequests) successful request(s) came back without token counts from the provider. They’re counted as unknown, not zero.").font(Theme.meta).foregroundStyle(Theme.attention) }
+                        breakdown("By model", byModel.map { ($0.key, $0.tokens.formatted(), Double($0.tokens)) })
+                        if days.count > 1 { Chart(days) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Tokens", $0.tokens)).foregroundStyle(Theme.accent) }.frame(height: 110) }
+                    }
+                }
             }
         }
     }
 
-    private func chartCard<C: View>(_ title: String, @ViewBuilder _ c: () -> C) -> some View {
-        Card { VStack(alignment: .leading, spacing: Theme.Space.sm) { Text(title).font(Theme.cardTitle); c().frame(height: 170) } }
-    }
-    private func groupChart(_ title: String, _ g: [UsageGroup]) -> some View {
-        chartCard(title) {
-            Chart(g.prefix(8)) { x in BarMark(x: .value("Requests", x.requests), y: .value("Name", x.model.isEmpty ? (title.contains("Capability") ? x.capability : x.provider) : x.model)).foregroundStyle(Theme.accent) }
-        }
+    private func metric(_ title: String, _ value: String, open: Binding<Bool>) -> some View {
+        Button { open.wrappedValue.toggle() } label: {
+            Card(padding: Theme.Space.lg) {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(title).font(.callout).foregroundStyle(Theme.textSecondary)
+                    Text(value).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
+                    HStack(spacing: 4) { Text(open.wrappedValue ? "Hide details" : "Details"); Image(systemName: open.wrappedValue ? "chevron.up" : "chevron.right").font(.caption2) }.font(.callout).foregroundStyle(Theme.textSecondary)
+                }.frame(maxWidth: .infinity, alignment: .leading)
+            }.contentShape(Rectangle())
+        }.buttonStyle(.plain).accessibilityLabel("\(title): \(value)").accessibilityHint(open.wrappedValue ? "Hides the breakdown" : "Shows the breakdown")
     }
 
-    // MARK: Tables
+    private func stat(_ t: String, _ v: String, note: String? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) { Text(t).font(Theme.meta).foregroundStyle(Theme.textSecondary); Text(v).font(.system(.title3, design: .rounded, weight: .semibold)).monospacedDigit(); if let note { Text(note).font(.system(size: 10)).foregroundStyle(Theme.textSecondary) } }
+    }
 
-    private var modelTable: some View {
-        let g = u.grouped(rows, by: .model)
-        return Card {
-            VStack(alignment: .leading, spacing: Theme.Space.sm) {
-                Text("Usage by Model").font(Theme.cardTitle)
-                if g.isEmpty { Text("Nothing to show yet.").foregroundStyle(Theme.textSecondary) }
-                else {
-                    Table(g) {
-                        TableColumn("Provider") { Text($0.provider) }
-                        TableColumn("Model") { Text($0.model).font(.system(.callout, design: .monospaced)) }
-                        TableColumn("Capability") { Text($0.capability) }
-                        TableColumn("Requests") { Text("\($0.requests)").monospacedDigit() }.width(70)
-                        TableColumn("Tokens") { Text($0.tokens.formatted()).monospacedDigit() }.width(90)
-                        TableColumn("Est. Cost") { Text($0.unknownCost > 0 && $0.knownCostMicros == 0 ? "Cost Unknown" : money($0.knownCostMicros, complete: $0.unknownCost == 0)).monospacedDigit() }.width(110)
-                        TableColumn("Errors") { Text("\($0.errors)").monospacedDigit() }.width(60)
-                    }.frame(height: CGFloat(min(g.count, 8)) * 28 + 36)
+    private func breakdown(_ title: String, _ items: [(String, String, Double)]) -> some View {
+        let mx = max(items.map(\.2).max() ?? 1, 1)
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(title).font(.system(.subheadline, design: .rounded, weight: .semibold))
+            if items.isEmpty { Text("Nothing yet.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            ForEach(items, id: \.0) { it in
+                HStack(spacing: 8) {
+                    Text(it.0).font(.callout).lineLimit(1).truncationMode(.middle).frame(width: 220, alignment: .leading)
+                    GeometryReader { g in RoundedRectangle(cornerRadius: 3).fill(Theme.accent.opacity(0.7)).frame(width: max(2, g.size.width * it.2 / mx)) }.frame(height: 8)
+                    Text(it.1).font(.callout.monospacedDigit()).frame(width: 80, alignment: .trailing)
                 }
             }
         }
     }
 
     private var historyTable: some View {
-        let list = filtered.sorted(using: sortOrder)
+        let list = rows.sorted(using: sortOrder)
         return Card {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
                 HStack {
                     Text("Request History").font(Theme.cardTitle); Spacer()
+                    Picker("Provider", selection: $providerFilter) { Text("All providers").tag(""); ForEach(providers, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 130)
+                    Picker("Model", selection: $modelFilter) { Text("All models").tag(""); ForEach(models, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 150)
                     Picker("Capability", selection: $capFilter) { Text("All capabilities").tag(Capability?.none); ForEach(Capability.allCases) { Text($0.label).tag(Capability?.some($0)) } }.labelsHidden().frame(width: 170)
                     Picker("Status", selection: $statusFilter) { Text("All").tag("all"); Text("Success").tag("success"); Text("Failed").tag("failed") }.labelsHidden().frame(width: 110)
                 }
-                Table(list.prefix(500).map { $0 }, sortOrder: $sortOrder) {
-                    TableColumn("Time", value: \.ts) { Text($0.ts.formatted(date: .abbreviated, time: .shortened)) }.width(130)
+                Table(list, selection: $picked, sortOrder: $sortOrder) {
+                    TableColumn("Time", value: \.ts) { Text($0.ts.formatted(.dateTime.month(.abbreviated).day().hour().minute())) }.width(130)
                     TableColumn("Task", value: \.task) { Text(WorkflowTask.find($0.task)?.title ?? $0.task) }
                     TableColumn("Course") { r in Text(r.courseId.flatMap { courseNames[$0] } ?? "—").foregroundStyle(Theme.textSecondary) }
                     TableColumn("Provider", value: \.providerId) { Text($0.providerId) }.width(90)
@@ -161,7 +173,16 @@ struct UsageView: View {
                     TableColumn("Out") { Text($0.outputTokens.map(String.init) ?? "—").monospacedDigit() }.width(60)
                     TableColumn("Cost") { r in Text(r.costMicros.map { money($0) + (r.costBasis == "local" ? " local" : "") } ?? "Unknown").monospacedDigit() }.width(90)
                 }.frame(height: CGFloat(min(max(list.count, 1), 12)) * 28 + 40)
-                if list.count > 500 { Text("Showing the newest 500 of \(list.count). Export CSV for everything.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                if let id = picked, let r = rows.first(where: { $0.id == id }) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Request details").font(.system(.subheadline, design: .rounded, weight: .semibold))
+                        Text("\(WorkflowTask.find(r.task)?.title ?? r.task) · \(r.providerId)/\(r.modelId) · \(r.ts.formatted(date: .abbreviated, time: .standard))").font(.callout)
+                        Text("Status: \(r.status)\(r.errorCategory.map { " (\($0))" } ?? "") · latency \(r.latencyMs) ms · tokens in \(r.inputTokens.map(String.init) ?? "not reported") / out \(r.outputTokens.map(String.init) ?? "not reported")\(r.cachedTokens.map { " / cached \($0)" } ?? "")").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                        Text("Cost: \(r.costMicros.map { money($0) } ?? "unknown") (\(r.costBasis == "estimated" ? "estimate from model prices" : r.costBasis)). The prompt and reply aren’t stored.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    }.padding(Theme.Space.md).frame(maxWidth: .infinity, alignment: .leading).background(Theme.elevated.opacity(0.5), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                }
+                if list.count >= 300 { Text("Showing the newest 300 matches. Export the detailed CSV for everything.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                Text("Request metadata only: no prompts, replies or keys are stored. Token counts come from the provider’s response; “—” means it reported none.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             }
         }
     }

@@ -88,7 +88,7 @@ public struct PresetPlanner: Sendable {
             .filter { conns[$0.connectionId] != nil && $0.health != .failed }
             .compactMap { m -> (AIModelRecord, Double)? in
                 if conns[m.connectionId]?.spec?.isLocal == true { return (m, 0) }
-                guard let o = m.outputPricePerM else { return nil }; return (m, o)
+                guard let o = m.effectiveOutputPricePerM else { return nil }; return (m, o)
             }.sorted { $0.1 < $1.1 }
         guard !ranked.isEmpty else { return [] }
         let cheapest = ranked.first!.0, top = ranked.last!.0, mid = ranked[ranked.count / 2].0
@@ -138,7 +138,7 @@ public extension GatewayStore {
 
 public struct GatewayConfigExport: Codable, Sendable {
     public struct Conn: Codable, Sendable { public var providerId: String, name: String; public var baseURL: String?; public var enabled: Bool }
-    public struct Mod: Codable, Sendable { public var providerId: String, connection: String, modelId: String, displayName: String, capability: Capability; public var inputPricePerM: Double?, outputPricePerM: Double? }
+    public struct Mod: Codable, Sendable { public var providerId: String, connection: String, modelId: String, displayName: String, capability: Capability; public var inputPricePerM: Double?, outputPricePerM: Double?, customInputPricePerM: Double?, customOutputPricePerM: Double? }
     public struct Def: Codable, Sendable { public var capability: Capability, providerId: String, connection: String, modelId: String }
     public struct Route: Codable, Sendable { public var task: String, inherit: Bool, manualBridge: Bool; public var providerId: String?, connection: String?, modelId: String?; public var maxRetries: Int; public var instruction: String?, temperature: Double?, maxTokens: Int?; public var timeoutSeconds: Int }
     public var version = 1
@@ -149,7 +149,7 @@ public struct GatewayConfigExport: Codable, Sendable {
         let conns = try s.connections(); let byId = Dictionary(uniqueKeysWithValues: conns.map { ($0.id, $0) })
         var e = GatewayConfigExport()
         e.connections = conns.map { Conn(providerId: $0.providerId, name: $0.name, baseURL: $0.baseURL, enabled: $0.enabled) }
-        e.models = try s.models().compactMap { m in byId[m.connectionId].map { Mod(providerId: $0.providerId, connection: $0.name, modelId: m.modelId, displayName: m.displayName, capability: m.capability, inputPricePerM: m.inputPricePerM, outputPricePerM: m.outputPricePerM) } }
+        e.models = try s.models().compactMap { m in byId[m.connectionId].map { Mod(providerId: $0.providerId, connection: $0.name, modelId: m.modelId, displayName: m.displayName, capability: m.capability, inputPricePerM: m.inputPricePerM, outputPricePerM: m.outputPricePerM, customInputPricePerM: m.customInputPricePerM, customOutputPricePerM: m.customOutputPricePerM) } }
         e.defaults = try s.capabilityDefaults().compactMap { d in byId[d.connectionId].map { Def(capability: d.capability, providerId: $0.providerId, connection: $0.name, modelId: d.modelId) } }
         e.routes = try s.routes().values.map { r in
             let c = r.connectionId.flatMap { byId[$0] }
@@ -172,7 +172,13 @@ public struct GatewayConfigExport: Codable, Sendable {
         }
         for c in existing where ProviderRegistry.spec(c.providerId)?.needsKey == true && ((try? secrets.read(c.keyAccount)) ?? nil) == nil { missing.append(c.name) }
         for m in models { if let c = find(m.providerId, m.connection) {
-            try s.merge(discovered: [AIModelRecord(id: UUID(), connectionId: c.id, modelId: m.modelId, displayName: m.displayName, capability: m.capability, source: "imported", inputPricePerM: m.inputPricePerM, outputPricePerM: m.outputPricePerM, health: .untested, createdAt: Date())]) } }
+            var r = AIModelRecord(id: UUID(), connectionId: c.id, modelId: m.modelId, displayName: m.displayName, capability: m.capability, source: "imported", inputPricePerM: m.inputPricePerM, outputPricePerM: m.outputPricePerM, health: .untested, createdAt: Date())
+            r.customInputPricePerM = m.customInputPricePerM; r.customOutputPricePerM = m.customOutputPricePerM
+            try s.merge(discovered: [r])
+            if m.customInputPricePerM != nil || m.customOutputPricePerM != nil, var e = try s.models(connection: c.id).first(where: { $0.modelId == m.modelId && $0.capability == m.capability }) {
+                e.customInputPricePerM = m.customInputPricePerM; e.customOutputPricePerM = m.customOutputPricePerM; try s.save(e)
+            }
+        } }
         for d in defaults { if let c = find(d.providerId, d.connection) { try s.setDefault(d.capability, connection: c.id, model: d.modelId) } }
         for r in routes where WorkflowTask.find(r.task) != nil {
             var x = TaskRoute(task: r.task); x.inherit = r.inherit; x.manualBridge = r.manualBridge; x.modelId = r.modelId

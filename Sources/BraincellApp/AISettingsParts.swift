@@ -5,13 +5,15 @@ import BraincellCore
 struct AIPage<Content: View>: View {
     let title: String
     var subtitle: String?
+    /// A one-line title bar for tool-like pages that need the room (the workflow canvas).
+    var compact = false
     @ViewBuilder var content: Content
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text(title).font(Theme.pageTitle).accessibilityAddTraits(.isHeader)
-                if let subtitle { Text(subtitle).foregroundStyle(Theme.textSecondary) }
-            }.padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
+                Text(title).font(compact ? .system(.title2, design: .rounded, weight: .bold) : Theme.pageTitle).accessibilityAddTraits(.isHeader)
+                if let subtitle, !compact { Text(subtitle).foregroundStyle(Theme.textSecondary) }
+            }.padding(.horizontal, Theme.Space.xl).padding(.vertical, compact ? Theme.Space.md : Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
             Divider()
             content.frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -63,6 +65,9 @@ struct ProviderIcon: View {
 }
 
 enum ModelBadge {
+    static func label(_ h: ModelHealth) -> (String, Color) {
+        switch h { case .ready: ("Verified", Theme.mastery); case .failed: ("Failed test", Theme.error); case .untested: ("Untested", Theme.textSecondary) }
+    }
     static func text(_ m: AIModelRecord, local: Bool) -> (String, Color) {
         if local { return ("Local", Theme.accent) }
         switch m.health { case .ready: return ("Ready", Theme.mastery); case .failed: return ("Failed test", Theme.error); case .untested: return ("Untested", Theme.textSecondary) }

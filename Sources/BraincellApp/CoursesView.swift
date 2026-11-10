@@ -6,13 +6,19 @@ struct CoursesView: View {
     @EnvironmentObject var model: AppModel
     @State private var showNew = false
     @State private var newName = ""
+    @State private var renaming: Course?
+    @State private var renameText = ""
+    @State private var showDeleted = false
 
     var body: some View {
         HSplitView {
             List(selection: $model.selectedCourseID) {
                 ForEach(model.courseList) { c in
                     ListRowLabel(title: c.name, symbol: c.kind == .quickCram ? "bolt.fill" : "graduationcap.fill", tint: c.kind == .quickCram ? Theme.attention : Theme.accent).tag(c.id)
-                        .contextMenu { Button("Archive") { model.perform { try model.courses?.archiveCourse(c.id) } } }
+                        .contextMenu {
+                            Button("Rename…") { renameText = c.name; renaming = c }
+                            Button("Delete…", role: .destructive) { model.askDeleteCourse = c.id }
+                        }
                 }
             }
             .sidePanel()
@@ -32,7 +38,14 @@ struct CoursesView: View {
             }
             .frame(minWidth: 520)
         }
-        .toolbar { Button { showNew = true } label: { Label("New Course", systemImage: "plus") }.keyboardShortcut("n") }
+        .toolbar {
+            Button { showDeleted = true } label: { Label("Recently Deleted", systemImage: "trash") }.help("Courses, folders and files you deleted in the last seven days")
+            Button { showNew = true } label: { Label("New Course", systemImage: "plus") }.keyboardShortcut("n")
+        }
+        .sheet(item: $renaming) { c in NameSheet(title: "Rename Course", prompt: "Course name", text: $renameText, confirm: "Rename") { model.perform { try model.courses?.renameCourse(c.id, to: renameText) } } }
+        .sheet(isPresented: $showDeleted) { DeletedSheet() }
+        .onChange(of: model.snapshotShowDeleted) { _, on in if on { showDeleted = true } }
+        .modifier(DeleteCourseDialog())
         .sheet(isPresented: $showNew) {
             NameSheet(title: "New Course", prompt: "Course name", text: $newName, confirm: "Create") {
                 model.createCourse(name: newName); newName = ""
@@ -59,27 +72,41 @@ struct NameSheet: View {
 }
 
 struct CourseDetailView: View {
-    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials", plan = "Plan" }
+    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials" }
 
     @EnvironmentObject var model: AppModel
     let course: Course
     @State private var tab: Tab = .assessments
     @State private var convertName = ""
     @State private var showConvert = false
+    @State private var showRename = false
+    @State private var renameText = ""
+
+    private var titleBlock: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Text(course.name).font(Theme.pageTitle).lineLimit(1)
+            if course.kind == .quickCram { Badge(text: "Quick Cram", color: Theme.attention) }
+            if let x = try? model.progression?.courseXP(course.id), x.xp > 0 { Badge(text: "Level \(x.level) · \(x.xp) XP") }
+        }
+    }
+    private var tabs: some View { SegmentedControl(selection: $tab, options: Tab.allCases) { $0.rawValue } }
+    private var actions: some View {
+        HStack(spacing: Theme.Space.md) {
+            Button { model.practiceCourse(course) } label: { Label("Practice", systemImage: "play.fill").lineLimit(1).fixedSize() }.buttonStyle(.primary)
+            Menu {
+                Button("Rename…") { renameText = course.name; showRename = true }
+                Divider()
+                Button("Delete Course…", role: .destructive) { model.askDeleteCourse = course.id }
+            } label: { Image(systemName: "ellipsis.circle").frame(width: 34, height: 30).contentShape(Rectangle()) }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Course actions")
+            if course.kind == .quickCram { Button("Convert to Course…") { convertName = course.name; showConvert = true } }
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(course.name).font(Theme.pageTitle)
-                    if course.kind == .quickCram { Badge(text: "Quick Cram", color: Theme.attention) }
-                    if let x = try? model.progression?.courseXP(course.id), x.xp > 0 { Badge(text: "Level \(x.level) · \(x.xp) XP") }
-                    Spacer()
-                    Button { model.practiceCourse(course) } label: { Label("Practice", systemImage: "play.fill") }
-                        .buttonStyle(.primary)
-                    if course.kind == .quickCram { Button("Convert to Course…") { convertName = course.name; showConvert = true } }
-                }
-                SegmentedControl(selection: $tab, options: Tab.allCases) { $0.rawValue }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.lg) { titleBlock.fixedSize(); tabs; Spacer(minLength: Theme.Space.md); actions }        // one line when it fits
+                VStack(alignment: .leading, spacing: 10) { HStack { titleBlock; Spacer(); actions }; tabs }                         // narrow windows keep two
             }
             .padding([.horizontal, .top], 20).padding(.bottom, 12)
             .controlStrip()
@@ -88,12 +115,11 @@ struct CourseDetailView: View {
                 case .assessments: AssessmentsTab(course: course)
                 case .topics: TopicsTab(course: course)
                 case .materials: MaterialsTab(course: course)
-                case .plan: StudyPlanTab(course: course)
                 }
             }
         }
-        .onAppear { if model.requestedCourseTab == "plan" || SnapshotRunner.isActive && model.requestedCourseTab != nil { tab = .plan } }
-        .onChange(of: model.requestedCourseTab) { _, t in if t == "plan" { tab = .plan } }
+        .onAppear { if SnapshotRunner.isActive, model.snapshotCourseTab == "materials" { tab = .materials } }
+        .sheet(isPresented: $showRename) { NameSheet(title: "Rename Course", prompt: "Course name", text: $renameText, confirm: "Rename") { model.perform { try model.courses?.renameCourse(course.id, to: renameText) } } }
         .sheet(isPresented: $showConvert) {
             NameSheet(title: "Convert to Course", prompt: "Course name", text: $convertName, confirm: "Convert") {
                 model.perform { try model.courses?.convertToCourse(course.id, name: convertName) }
@@ -302,72 +328,48 @@ struct TopicsTab: View {
 
 // MARK: Materials
 
+/// A course's Materials are the Library rooted at that course: same records, same folders, same actions.
 struct MaterialsTab: View {
-    @EnvironmentObject var model: AppModel
     let course: Course
-    @State private var docs: [Document] = []
-    @State private var picking = false
-    @State private var pasting = false
-    @State private var pasteTitle = ""
-    @State private var pasteText = ""
-    @State private var targeted = false
-
-    private static let types: [UTType] = [.pdf, .plainText, UTType(filenameExtension: "md") ?? .plainText]
-
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Button { picking = true } label: { Label("Import Files…", systemImage: "square.and.arrow.down") }
-                Button { pasting = true } label: { Label("Paste Notes…", systemImage: "doc.on.clipboard") }
-                Spacer()
-                Text("PDF, text and Markdown. Scanned PDFs are flagged; OCR isn’t available yet.").font(.caption).foregroundStyle(Theme.textSecondary)
-            }.padding(16)
-            if docs.isEmpty {
-                EmptyStateView(symbol: "doc.badge.plus", title: "No materials",
-                               message: "Drop PDFs or text files here, or paste notes. Originals are copied into Learn Anyway’s managed storage.")
-            } else {
-                List(docs) { d in
-                    HStack(alignment: .top) {
-                        Image(systemName: d.kind == .pdf ? "doc.richtext" : "doc.text").foregroundStyle(Theme.accent)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(d.title).font(.headline)
-                            Text(detail(d)).font(.caption).foregroundStyle(Theme.textSecondary)
-                        }
-                        Spacer()
-                        switch d.extractionStatus {
-                        case .ok: Badge(text: "Text extracted", color: Theme.mastery)
-                        case .partial: Badge(text: "\(d.lowContentPageCount) low-content page(s)", color: Theme.attention)
-                        case .failed: Badge(text: "No text found", color: Theme.attention)
-                        }
-                    }.accessibilityElement(children: .combine)
-                }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.surface)
+            Text("Documents, images and videos for this course. They also appear in Library.")
+                .font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1).padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.sm)
+            LibraryBrowser(base: .course(course.id)).id(course.id)
+        }
+    }
+}
+
+// MARK: Deleting courses
+
+/// One confirmation for every way of deleting a course (list, detail header, Library course folder).
+struct DeleteCourseDialog: ViewModifier {
+    @EnvironmentObject var model: AppModel
+    private var course: Course? { model.askDeleteCourse.flatMap { id in model.courseList.first { $0.id == id } } }
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Delete “\(course?.name ?? "")”?", isPresented: Binding(get: { course != nil }, set: { if !$0 { model.askDeleteCourse = nil } }), titleVisibility: .visible) {
+            Button("Delete Course", role: .destructive) {
+                if let c = course {
+                    model.perform { try model.library?.deleteCourse(c.id) }
+                    if model.selectedCourseID == c.id { model.selectedCourseID = nil }
+                }
+                model.askDeleteCourse = nil
             }
+            Button("Cancel", role: .cancel) { model.askDeleteCourse = nil }
+        } message: {
+            let until = Date().addingTimeInterval(LibraryService.retention).formatted(date: .long, time: .omitted)
+            Text("The course and its materials and folders move to Recently Deleted. You can restore them until \(until). After that, the materials are permanently deleted. Questions and study progress are kept.")
         }
-        .overlay { if targeted { RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).background(Theme.accent.opacity(0.06)).padding(6).allowsHitTesting(false) } }
-        .dropDestination(for: URL.self, action: { urls, _ in model.importFiles(urls, courseId: course.id); return true }, isTargeted: { targeted = $0 })
-        .fileImporter(isPresented: $picking, allowedContentTypes: Self.types, allowsMultipleSelection: true) { result in
-            if case .success(let urls) = result { model.importFiles(urls, courseId: course.id) }
-        }
-        .sheet(isPresented: $pasting) {
-            VStack(alignment: .leading, spacing: Theme.Space.md) {
-                Text("Paste Notes").font(Theme.sectionTitle)
-                TextField("Title (optional)", text: $pasteTitle).accessibilityLabel("Title for pasted notes")
-                TextEditor(text: $pasteText).font(.body).frame(minHeight: 220).fieldSurface()
-                HStack { Spacer(); Button("Cancel") { pasting = false }.keyboardShortcut(.cancelAction)
-                    Button("Import") { importPasted() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(pasteText.trimmed.isEmpty) }
-            }.dialogSurface(width: 520)
-        }
-        .task(id: model.revision) { docs = (try? model.documents?.documents(courseId: course.id)) ?? [] }
     }
+}
 
-    private func detail(_ d: Document) -> String {
-        var parts = [d.originalFilename, ByteCountFormatter.string(fromByteCount: Int64(d.byteCount), countStyle: .file)]
-        if let p = d.pageCount { parts.append("\(p) pages") }
-        return parts.joined(separator: " · ")
-    }
-
-    private func importPasted() {
-        model.perform { _ = try model.documents?.importPasted(text: pasteText, title: pasteTitle, courseId: course.id) }
-        pasteText = ""; pasteTitle = ""; pasting = false
+struct DeletedSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack { Text("Recently Deleted").font(Theme.sectionTitle); Spacer(); Button("Done") { dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction) }.padding(Theme.Space.lg)
+            Divider()
+            RecentlyDeletedView()
+        }.frame(width: 680, height: 480).background(Theme.background)
     }
 }
