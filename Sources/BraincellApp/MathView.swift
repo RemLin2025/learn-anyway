@@ -60,6 +60,19 @@ struct MathNodeView: View {
             }
         case .delimited(let l, let x, let r):
             HStack(spacing: 1) { Text(l).font(.system(size: size * 1.3, design: .serif)); MathNodeView(node: x, size: size); Text(r).font(.system(size: size * 1.3, design: .serif)) }
+        case .matrix(let rows, let l, let r):
+            HStack(spacing: 2) {
+                if !l.isEmpty { Text(l).font(.system(size: size * Double(max(1.4, Double(rows.count) * 1.1)), design: .serif)) }
+                Grid(horizontalSpacing: size * 0.8, verticalSpacing: size * 0.2) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        GridRow { ForEach(Array(row.enumerated()), id: \.offset) { MathNodeView(node: $1, size: size) } }
+                    }
+                }
+                if !r.isEmpty { Text(r).font(.system(size: size * Double(max(1.4, Double(rows.count) * 1.1)), design: .serif)) }
+            }
+        case .accent(let a, let x):
+            if case .symbol(let t) = x, t.count == 1 { Text(t + a).font(.system(size: size, design: .serif)).italic() }
+            else { VStack(spacing: 0) { MathNodeView(node: x, size: size).padding(.top, 3).overlay(alignment: .top) { Rectangle().frame(height: 1) } } }   // a container is required: a bare recursive branch makes SwiftUI recurse forever
         case .space: Color.clear.frame(width: size * 0.3, height: 1)
         }
     }

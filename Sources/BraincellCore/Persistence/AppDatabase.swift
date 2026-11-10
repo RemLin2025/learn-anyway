@@ -664,6 +664,22 @@ public final class AppDatabase: Sendable {
             }
             try db.create(index: "study_maps_on_course", on: "study_maps", columns: ["courseId", "updatedAt"])
         }
+        m.registerMigration("v16_study_prep_jobs") { db in
+            // One resumable exam-preparation job per course/assessment; stage and per-stage results are saved as they finish.
+            try db.create(table: "study_prep_jobs") { t in
+                t.primaryKey("id", .blob)
+                t.column("conversationId", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .setNull)
+                t.column("stage", .text).notNull()
+                t.column("status", .text).notNull()
+                t.column("stateJSON", .text).notNull()
+                t.column("error", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "study_prep_jobs_on_course", on: "study_prep_jobs", columns: ["courseId", "updatedAt"])
+        }
         return m
     }
 

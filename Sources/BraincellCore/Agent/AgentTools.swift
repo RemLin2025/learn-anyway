@@ -33,7 +33,7 @@ public struct ActionChip: Codable, Sendable, Equatable, Hashable {
     public var assessmentId: UUID?
     public var planId: UUID?
     public var dayIndex: Int?
-    public static let allowed: Set<String> = ["openCourse", "openLibrary", "openQuestionBank", "openSkills", "addFiles", "startPractice", "openPlan", "startReviews", "resumeSession"]
+    public static let allowed: Set<String> = ["openCourse", "openLibrary", "openQuestionBank", "openSkills", "addFiles", "startPractice", "openPlan", "startReviews", "resumeSession", "prepareExam"]
 }
 
 public struct ToolOutput: Sendable {

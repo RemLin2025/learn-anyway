@@ -173,7 +173,8 @@ extension AgentRegistry {
             if let w = weight, !(0...100).contains(w) { weight = nil; warnings.append("“\(name)”: weight outside 0–100% was removed.") }
             if src == .estimated, evidence.isEmpty { level = "unknown"; src = .unknown; warnings.append("“\(name)”: no evidence for the estimate, so importance is unknown.") }
             topics.append(.init(name: name, objectives: Array(strings(t["objectives"]).prefix(8)), prerequisites: Array(strings(t["prerequisites"]).prefix(8)), sources: refs,
-                                importance: .init(level: level, source: src, weightPercent: weight, evidence: String(evidence.prefix(400)))))
+                                importance: .init(level: level, source: src, weightPercent: weight, evidence: String(evidence.prefix(400))),
+                                parent: (t["parent"] as? String).flatMap { $0.isEmpty || $0 == name ? nil : $0 }))
         }
         var structures: [StudyMapDocument.Structure] = []
         for (i, s) in a.objects("structures").prefix(30).enumerated() {

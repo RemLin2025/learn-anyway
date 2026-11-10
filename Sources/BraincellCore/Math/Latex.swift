@@ -13,6 +13,10 @@ public indirect enum MathNode: Equatable, Sendable {
     case supsub(MathNode, sub: MathNode, sup: MathNode)
     case bigOp(String, lower: MathNode?, upper: MathNode?)
     case delimited(String, MathNode, String)
+    /// Rows of cells; `left`/`right` are the fences (pmatrix `(` `)`, cases `{` and none).
+    case matrix([[MathNode]], left: String, right: String)
+    /// \bar, \vec, \hat, \tilde drawn over the content.
+    case accent(String, MathNode)
     case space
 }
 
@@ -64,7 +68,7 @@ public enum Latex {
         "Rightarrow": "⇒", "Leftarrow": "⇐", "Leftrightarrow": "⇔", "iff": "⟺", "in": "∈", "notin": "∉", "subset": "⊂",
         "subseteq": "⊆", "cup": "∪", "cap": "∩", "forall": "∀", "exists": "∃", "partial": "∂", "nabla": "∇", "ldots": "…",
         "dots": "…", "cdots": "⋯", "emptyset": "∅", "neg": "¬", "land": "∧", "lor": "∨", "oplus": "⊕", "propto": "∝",
-        "angle": "∠", "degree": "°", "prime": "′", "mid": "∣", "ll": "≪", "gg": "≫", "mapsto": "↦", "circ": "∘",
+        "angle": "∠", "langle": "⟨", "rangle": "⟩", "degree": "°", "prime": "′", "mid": "∣", "ll": "≪", "gg": "≫", "mapsto": "↦", "circ": "∘",
         "{": "{", "}": "}", "%": "%", "$": "$", "&": "&", "#": "#", "_": "_", "|": "‖",
     ]
     static let bigOps: [String: String] = ["sum": "∑", "prod": "∏", "int": "∫", "oint": "∮", "bigcup": "⋃", "bigcap": "⋂", "lim": "lim"]
@@ -105,6 +109,8 @@ public enum Latex {
         case .bigOp(let s, let lo, let hi):
             return s + (lo.map { script(flatten($0), table: sub, marker: "_") } ?? "") + (hi.map { script(flatten($0), table: sup, marker: "^") } ?? "")
         case .delimited(let l, let x, let r): return l + flatten(x) + r
+        case .matrix(let rows, let l, let r): return l + rows.map { $0.map(flatten).joined(separator: ", ") }.joined(separator: "; ") + r
+        case .accent(let a, let x): return flatten(x) + a
         case .space: return " "
         }
     }
@@ -216,7 +222,12 @@ public enum Latex {
                 guard startsWith("\\right") else { throw LatexError.unbalanced }
                 _ = readName()
                 return .delimited(open, inner, try delimiter())
-            case "begin", "end", "\\", "right": throw LatexError.unsupported(name)
+            case "begin": return try environment()
+            case "bar", "overline": return .accent("\u{0304}", try atom(depth: depth + 1))
+            case "vec": return .accent("\u{20D7}", try atom(depth: depth + 1))
+            case "hat": return .accent("\u{0302}", try atom(depth: depth + 1))
+            case "tilde": return .accent("\u{0303}", try atom(depth: depth + 1))
+            case "end", "\\", "right": throw LatexError.unsupported(name)
             default: break
             }
             if let s = bigOps[name] { return .bigOp(s, lower: nil, upper: nil) }
@@ -225,6 +236,22 @@ public enum Latex {
             if spaces.contains(name) { return .space }
             if let s = symbols[name] { return .symbol(s) }
             throw LatexError.unsupported(name)
+        }
+
+        /// \begin{pmatrix} a & b \\ c & d \end{pmatrix} and friends; cells are parsed as ordinary math.
+        mutating func environment() throws -> MathNode {
+            let env = try rawGroup()
+            let fences: [String: (String, String)] = ["matrix": ("", ""), "pmatrix": ("(", ")"), "bmatrix": ("[", "]"), "vmatrix": ("|", "|"), "Vmatrix": ("‖", "‖"), "cases": ("{", "")]
+            guard let f = fences[env] else { throw LatexError.unsupported(env) }
+            let end = Array("\\end{\(env)}")
+            var j = i
+            while j + end.count <= chars.count, Array(chars[j..<j + end.count]) != end { j += 1 }
+            guard j + end.count <= chars.count else { throw LatexError.unbalanced }
+            let body = String(chars[i..<j]); i = j + end.count
+            let rows = try body.components(separatedBy: "\\\\").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+                .map { try $0.components(separatedBy: "&").map { try Latex.parse($0.trimmingCharacters(in: .whitespaces)) } }
+            guard !rows.isEmpty, rows.count <= 12, rows.allSatisfy({ $0.count <= 12 }) else { throw LatexError.tooLarge }
+            return .matrix(rows, left: f.0, right: f.1)
         }
 
         mutating func delimiter() throws -> String {

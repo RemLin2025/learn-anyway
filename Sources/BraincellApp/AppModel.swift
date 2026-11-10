@@ -85,6 +85,10 @@ final class AppModel: ObservableObject {
     @Published var snapshotIndex: Int?
     /// Set to open the "new AI task" sheet prefilled (e.g. Generate Similar).
     @Published var generateRequest: GenerateRequest?
+    @Published var practiceSetup: PracticeSetupRequest?
+    /// Set by chat's View Questions: the Question Bank opens filtered to this course, then clears it.
+    @Published var questionBankCourse: UUID?
+    var agentStore: AgentStore? { db.map { AgentStore(db: $0) } }
 
     init(databaseURL: URL? = nil, storage: ManagedStorage = AppModel.defaultStorage()) {
         do {

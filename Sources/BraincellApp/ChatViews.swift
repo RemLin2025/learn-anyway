@@ -170,6 +170,15 @@ struct Composer: View {
     @EnvironmentObject var model: AppModel
     let compact: Bool
     @FocusState private var focused: Bool
+    @State private var showMath = false
+
+    /// Appends at the end of the draft, wrapped in $…$ so it renders. (A SwiftUI selection binding crashed when the draft was cleared on send,
+    /// so the chat composer does not track the caret; the practice answer fields do insert at the caret.)
+    private func insertMath(_ latex: String) {
+        let e = MathPalette.insert(latex, into: chat.draft, selection: NSRange(location: (chat.draft as NSString).length, length: 0), wrap: true)
+        chat.draft = e.text
+        focused = true
+    }
 
     var body: some View {
         let res = chat.resolution
@@ -200,6 +209,9 @@ struct Composer: View {
                         Divider()
                         ForEach(model.courseList) { c in Button(c.name) { chat.setCourse(c.id) } }
                     } label: { HStack(spacing: 4) { Image(systemName: "book"); Text(model.courseList.first { $0.id == chat.courseId }?.name ?? "All courses").lineLimit(1); Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }.font(.callout) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Course context")
+                    Button { showMath.toggle() } label: { Image(systemName: "function").font(.system(size: 15, weight: .medium)) }.buttonStyle(.plain).help("Insert math (⇧⌘M)").accessibilityLabel("Insert math")
+                        .keyboardShortcut("m", modifiers: [.command, .shift])
+                        .popover(isPresented: $showMath, arrowEdge: .top) { MathPaletteView { insertMath($0) } }
                     Spacer()
                     modelMenu(res)
                     Button { chat.thinking ? chat.stop() : chat.send() } label: {

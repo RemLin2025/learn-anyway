@@ -290,6 +290,7 @@ public struct StudyMapDocument: Codable, Sendable, Equatable {
     public struct Topic: Codable, Sendable, Equatable, Identifiable {
         public var name: String; public var objectives: [String]; public var prerequisites: [String]
         public var sources: [SourceRef]; public var importance: Importance
+        public var parent: String? = nil              // name of the parent topic (hierarchy)
         public var id: String { name }
         public var sourced: Bool { !sources.isEmpty }
     }

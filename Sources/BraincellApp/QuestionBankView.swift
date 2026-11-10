@@ -34,6 +34,8 @@ struct QuestionBankView: View {
                 .disabled(rows.isEmpty).help("Practice the selected questions, or everything shown")
         }
         .task(id: model.revision) { load() }
+        .onAppear { applyCourseFocus() }
+        .onChange(of: model.questionBankCourse) { _, _ in applyCourseFocus() }
         .onChange(of: filter.courseId) { _, _ in filter.assessmentId = nil; filter.skillId = nil }   // hidden filters must not keep applying
         .onChange(of: filter) { _, _ in load() }
         .onChange(of: selection) { _, _ in loadDetail() }
@@ -44,7 +46,8 @@ struct QuestionBankView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) { filterControls }.controlStrip()
+        // Fits without scrolling when there is room (menus inside a scroll view are less reliable); scrolls only on a narrow window.
+        ViewThatFits(in: .horizontal) { filterControls; ScrollView(.horizontal, showsIndicators: false) { filterControls } }.controlStrip()
     }
 
     private var filterControls: some View {
@@ -151,6 +154,12 @@ struct QuestionBankView: View {
                 }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func applyCourseFocus() {
+        guard let c = model.questionBankCourse else { return }
+        var f = QuestionFilter(); f.courseId = c; filter = f
+        model.questionBankCourse = nil
     }
 
     private func load() {

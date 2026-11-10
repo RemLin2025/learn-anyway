@@ -135,7 +135,7 @@ extension AgentRegistry {
         let summary = "Saved \(accepted) question(s) to the Question Bank\(dup > 0 ? ", skipped \(dup) duplicate(s)" : "")\(rejected > 0 ? ", \(rejected) rejected by validation" : ""). They are marked Unverified until reviewed."
         g.saved = true; g.savedSummary = summary
         try c.store.setStatus(generationId, .succeeded, result: String(data: try JSONEncoder().encode(g), encoding: .utf8))
-        return ToolOutput(text: summary, summary: "Saved \(accepted) question(s)", chips: [ActionChip(label: "Open Question Bank", action: "openQuestionBank"), ActionChip(label: "Practice", action: "startPractice", courseId: g.courseId)])
+        return ToolOutput(text: summary, summary: "Saved \(accepted) question(s)", chips: [ActionChip(label: "Open Question Bank", action: "openQuestionBank", courseId: g.courseId), ActionChip(label: "Practice", action: "startPractice", courseId: g.courseId)])
     }
 
     // MARK: Study plan
