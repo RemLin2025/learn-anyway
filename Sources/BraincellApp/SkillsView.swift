@@ -16,9 +16,7 @@ struct SkillsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("Course", selection: $courseId) {
-                    ForEach(model.courseList) { Text($0.name).tag(UUID?.some($0.id)) }
-                }.frame(maxWidth: 260)
+                FilterMenu(title: "Course", selection: $courseId, options: model.courseList.map { ($0.id, $0.name) }, allowsAny: false)
                 if let c = courseId, let s = try? model.progression?.courseXP(c) {
                     Badge(text: "Course level \(s.level) · \(s.xp) XP")
                 }

@@ -74,7 +74,7 @@ struct UsageView: View {
 
     private var controls: some View {
         HStack {
-            Picker("Period", selection: $span) { ForEach(Span.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 170)
+            FilterMenu(title: "Period", selection: Binding(get: { span }, set: { span = $0 ?? .d30 }), options: Span.allCases.map { ($0, $0.rawValue) }, allowsAny: false)
             if span == .custom { DatePicker("From", selection: $from, displayedComponents: .date).labelsHidden(); Text("to"); DatePicker("To", selection: $to, displayedComponents: .date).labelsHidden() }
             Spacer()
             Menu("Export") {
@@ -156,10 +156,10 @@ struct UsageView: View {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
                 HStack {
                     Text("Request History").font(Theme.cardTitle); Spacer()
-                    Picker("Provider", selection: $providerFilter) { Text("All providers").tag(""); ForEach(providers, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 130)
-                    Picker("Model", selection: $modelFilter) { Text("All models").tag(""); ForEach(models, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 150)
-                    Picker("Capability", selection: $capFilter) { Text("All capabilities").tag(Capability?.none); ForEach(Capability.allCases) { Text($0.label).tag(Capability?.some($0)) } }.labelsHidden().frame(width: 170)
-                    Picker("Status", selection: $statusFilter) { Text("All").tag("all"); Text("Success").tag("success"); Text("Failed").tag("failed") }.labelsHidden().frame(width: 110)
+                    FilterMenu(title: "Provider", selection: Binding(get: { providerFilter.isEmpty ? nil : providerFilter }, set: { providerFilter = $0 ?? "" }), options: providers.map { ($0, $0) }, anyLabel: "All providers")
+                    FilterMenu(title: "Model", selection: Binding(get: { modelFilter.isEmpty ? nil : modelFilter }, set: { modelFilter = $0 ?? "" }), options: models.map { ($0, $0) }, anyLabel: "All models")
+                    FilterMenu(title: "Capability", selection: $capFilter, options: Capability.allCases.map { ($0, $0.label) }, anyLabel: "All capabilities")
+                    FilterMenu(title: "Status", selection: Binding(get: { statusFilter == "all" ? nil : statusFilter }, set: { statusFilter = $0 ?? "all" }), options: [("success", "Success"), ("failed", "Failed")], anyLabel: "All statuses")
                 }
                 Table(list, selection: $picked, sortOrder: $sortOrder) {
                     TableColumn("Time", value: \.ts) { Text($0.ts.formatted(.dateTime.month(.abbreviated).day().hour().minute())) }.width(130)

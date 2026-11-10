@@ -382,11 +382,18 @@ struct FilterMenu<T: Hashable>: View {
     let title: String
     @Binding var selection: T?
     let options: [(value: T, label: String)]
+    /// False for a required choice (a course, a period): no "Any" row, and the value shows in normal text instead of as an active filter.
+    var allowsAny = true
+    var anyLabel: String?
     var body: some View {
         let current = options.first { $0.value == selection }?.label
+        let active = allowsAny && current != nil
         Menu {
-            Button { selection = nil } label: { if selection == nil { Label("Any \(title.lowercased())", systemImage: "checkmark") } else { Text("Any \(title.lowercased())") } }
-            Divider()
+            if allowsAny {
+                let any = anyLabel ?? "Any \(title.lowercased())"
+                Button { selection = nil } label: { if selection == nil { Label(any, systemImage: "checkmark") } else { Text(any) } }
+                Divider()
+            }
             ForEach(options, id: \.value) { o in
                 Button { selection = o.value } label: { if selection == o.value { Label(o.label, systemImage: "checkmark") } else { Text(o.label) } }
             }
@@ -395,10 +402,10 @@ struct FilterMenu<T: Hashable>: View {
                 Text(current ?? title).lineLimit(1)
                 Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
             }
-            .font(.system(.callout, design: .rounded, weight: current == nil ? .regular : .semibold))
-            .foregroundStyle(current == nil ? Theme.textSecondary : Theme.accent)
+            .font(.system(.callout, design: .rounded, weight: active ? .semibold : .regular))
+            .foregroundStyle(active ? Theme.accent : (allowsAny ? Theme.textSecondary : Theme.textPrimary))
             .padding(.horizontal, 10).frame(minHeight: 28)
-            .background(current == nil ? Theme.surface : Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .background(active ? Theme.accent.opacity(0.12) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
             .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
             .contentShape(Rectangle())
         }

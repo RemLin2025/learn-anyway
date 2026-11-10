@@ -24,7 +24,7 @@ struct InsightsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("Course", selection: $courseId) { ForEach(model.courseList) { Text($0.name).tag(UUID?.some($0.id)) } }.frame(maxWidth: 280)
+                FilterMenu(title: "Course", selection: $courseId, options: model.courseList.map { ($0.id, $0.name) }, allowsAny: false)
                 Spacer()
                 Text("Based only on what you’ve answered. Learn Anyway doesn’t predict exam grades.").font(.caption).foregroundStyle(Theme.textSecondary)
             }.padding(12).controlStrip()
@@ -115,7 +115,7 @@ struct InsightsView: View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
                     Text("Skill changes over time").font(.headline)
-                    Picker("Skill", selection: $skillId) { Text("Choose a skill").tag(UUID?.none); ForEach(skills) { Text($0.name).tag(UUID?.some($0.id)) } }.frame(maxWidth: 260)
+                    FilterMenu(title: "Choose a skill", selection: $skillId, options: skills.map { ($0.id, $0.name) }, allowsAny: false)
                 }
                 let pts = trend.filter { $0.overall != nil }
                 if skillId == nil { Text("Pick a skill to see how its estimate has moved.").foregroundStyle(Theme.textSecondary) }
