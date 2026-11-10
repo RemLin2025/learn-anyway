@@ -153,7 +153,12 @@ public enum QuestionValidator {
                 }
                 var b = ContentBlock(kind: kind)
                 switch kind {
-                case .markdown: b.text = string(d, "text", p, required: true, max: QuestionLimits.textField)
+                case .markdown:
+                    b.text = string(d, "text", p, required: true, max: QuestionLimits.textField)
+                    if let t = b.text {
+                        for issue in MathMarkdown.issues(t) { review("\(p).text", issue) }     // flagged, never silently repaired
+                        b.text = MathMarkdown.normalize(t)                                    // $…$ → \(…\), $$…$$ → \[…\]; formulas copied verbatim
+                    }
                 case .code:
                     b.text = string(d, "text", p, required: true, max: QuestionLimits.textField)
                     b.language = string(d, "language", p, required: false, max: 30)

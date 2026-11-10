@@ -17,6 +17,8 @@ public indirect enum MathNode: Equatable, Sendable {
     case matrix([[MathNode]], left: String, right: String)
     /// \bar, \vec, \hat, \tilde drawn over the content.
     case accent(String, MathNode)
+    /// aligned / align / gather: rows of cells split at `&` (column 1 right-aligned, the rest left-aligned).
+    case aligned([[MathNode]])
     case space
 }
 
@@ -71,6 +73,7 @@ public enum Latex {
         "angle": "∠", "langle": "⟨", "rangle": "⟩", "degree": "°", "prime": "′", "mid": "∣", "ll": "≪", "gg": "≫", "mapsto": "↦", "circ": "∘",
         "{": "{", "}": "}", "%": "%", "$": "$", "&": "&", "#": "#", "_": "_", "|": "‖",
     ]
+    static let blackboard: [Character: String] = ["R": "ℝ", "E": "𝔼", "P": "ℙ", "N": "ℕ", "Z": "ℤ", "Q": "ℚ", "C": "ℂ", "1": "𝟙"]
     static let bigOps: [String: String] = ["sum": "∑", "prod": "∏", "int": "∫", "oint": "∮", "bigcup": "⋃", "bigcap": "⋂", "lim": "lim"]
     static let functions: Set<String> = ["sin", "cos", "tan", "cot", "sec", "csc", "log", "ln", "exp", "max", "min", "det", "gcd", "arcsin", "arccos", "arctan", "sinh", "cosh", "tanh"]
     static let textCommands: Set<String> = ["text", "mathrm", "mathbf", "mathit", "textbf", "textit", "operatorname", "mathbb", "mathcal", "mathsf", "mathtt"]
@@ -111,6 +114,7 @@ public enum Latex {
         case .delimited(let l, let x, let r): return l + flatten(x) + r
         case .matrix(let rows, let l, let r): return l + rows.map { $0.map(flatten).joined(separator: ", ") }.joined(separator: "; ") + r
         case .accent(let a, let x): return flatten(x) + a
+        case .aligned(let rows): return rows.map { $0.map(flatten).joined(separator: " ") }.joined(separator: "; ")
         case .space: return " "
         }
     }
@@ -141,6 +145,7 @@ public enum Latex {
 
         mutating func postfix(depth: Int) throws -> MathNode {
             let atom = try self.atom(depth: depth)
+            while startsWith("\\limits") || startsWith("\\nolimits") { i += startsWith("\\limits") ? 7 : 9 }
             var lo: MathNode?, hi: MathNode?
             while let c = peek, c == "^" || c == "_" {
                 i += 1
@@ -223,6 +228,13 @@ public enum Latex {
                 _ = readName()
                 return .delimited(open, inner, try delimiter())
             case "begin": return try environment()
+            case "displaystyle", "textstyle", "limits", "nolimits": return .space
+            case "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr", "middle":
+                let d = try delimiter(); return d.isEmpty ? .space : .symbol(d)
+            case "boldsymbol", "bm", "boldmath": return try atom(depth: depth + 1)
+            case "binom", "dbinom", "tbinom":
+                let top = try atom(depth: depth + 1), bottom = try atom(depth: depth + 1)
+                return .delimited("(", .matrix([[top], [bottom]], left: "", right: ""), ")")
             case "bar", "overline": return .accent("\u{0304}", try atom(depth: depth + 1))
             case "vec": return .accent("\u{20D7}", try atom(depth: depth + 1))
             case "hat": return .accent("\u{0302}", try atom(depth: depth + 1))
@@ -232,7 +244,11 @@ public enum Latex {
             }
             if let s = bigOps[name] { return .bigOp(s, lower: nil, upper: nil) }
             if functions.contains(name) { return .text(name) }
-            if textCommands.contains(name) { return .text(try rawGroup()) }
+            if textCommands.contains(name) {
+                let raw = try rawGroup()
+                if name == "mathbb", raw.count == 1, let g = Latex.blackboard[raw.first!] { return .symbol(g) }
+                return .text(raw)
+            }
             if spaces.contains(name) { return .space }
             if let s = symbols[name] { return .symbol(s) }
             throw LatexError.unsupported(name)
@@ -242,7 +258,9 @@ public enum Latex {
         mutating func environment() throws -> MathNode {
             let env = try rawGroup()
             let fences: [String: (String, String)] = ["matrix": ("", ""), "pmatrix": ("(", ")"), "bmatrix": ("[", "]"), "vmatrix": ("|", "|"), "Vmatrix": ("‖", "‖"), "cases": ("{", "")]
-            guard let f = fences[env] else { throw LatexError.unsupported(env) }
+            let alignedEnvs: Set<String> = ["aligned", "align", "align*", "gather", "gather*", "split"]
+            guard fences[env] != nil || alignedEnvs.contains(env) else { throw LatexError.unsupported(env) }
+            let f = fences[env] ?? ("", "")
             let end = Array("\\end{\(env)}")
             var j = i
             while j + end.count <= chars.count, Array(chars[j..<j + end.count]) != end { j += 1 }
@@ -251,7 +269,7 @@ public enum Latex {
             let rows = try body.components(separatedBy: "\\\\").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
                 .map { try $0.components(separatedBy: "&").map { try Latex.parse($0.trimmingCharacters(in: .whitespaces)) } }
             guard !rows.isEmpty, rows.count <= 12, rows.allSatisfy({ $0.count <= 12 }) else { throw LatexError.tooLarge }
-            return .matrix(rows, left: f.0, right: f.1)
+            return alignedEnvs.contains(env) ? .aligned(rows) : .matrix(rows, left: f.0, right: f.1)
         }
 
         mutating func delimiter() throws -> String {

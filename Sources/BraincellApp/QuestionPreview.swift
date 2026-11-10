@@ -14,7 +14,7 @@ struct BlockView: View {
     var body: some View {
         switch block.kind {
         case .markdown:
-            RichText(text: block.text ?? "")
+            MathContentView(text: block.text ?? "")
         case .code:
             VStack(alignment: .leading, spacing: 4) {
                 if let l = block.language { Text(l.uppercased()).font(.caption2.weight(.semibold)).foregroundStyle(Theme.textSecondary) }
@@ -24,7 +24,7 @@ struct BlockView: View {
             .padding(10).background(Theme.elevated, in: RoundedRectangle(cornerRadius: 8))
             .accessibilityLabel("Code, \(block.language ?? "unknown language")")
         case .math:
-            MathView(latex: block.latex ?? "", size: 22).padding(.vertical, 4)
+            DisplayMath(latex: block.latex ?? "", boxed: MathMarkdown.shouldBox(block.latex ?? ""), size: 22)
         case .table:
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
                 GridRow { ForEach(Array((block.headers ?? []).enumerated()), id: \.offset) { Text($1).font(.headline) } }

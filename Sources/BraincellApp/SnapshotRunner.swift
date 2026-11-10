@@ -25,6 +25,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_LIBRARY_SNAP"] != nil { await libraryScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_BENCH"] != nil { await Bench.run(model, dir: dir); NSApp.terminate(nil); return }
@@ -60,6 +61,29 @@ enum SnapshotRunner {
     }
 
     /// Drives the real Home chat against a local scripted model server (BRAINCELL_CHAT_PORT) and screenshots each stage. Only against BRAINCELL_DATA_DIR.
+    /// Screenshots of math-heavy questions (structured, legacy plain text, long equations) in dark and light. Uses only the demo workspace.
+    static func mathScenario(_ model: AppModel, dir: URL) async {
+        model.loadDemo()
+        guard let c = model.courseList.first, let qs = model.questions else { return }
+        func shot(_ name: String) async {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        func make(_ title: String, _ text: String) -> UUID? {
+            try? qs.create(courseId: c.id, spec: QuestionSpec(type: .longForm, title: title, difficulty: 4, learningObjective: "Reason about correlation", content: [.markdown(text)],
+                answer: AnswerSpec(), evaluation: EvaluationSpec(method: .aiRubric, rubric: [RubricItem(criterion: "Correct", points: 3)]), hints: ["Standardize first."])).id
+        }
+        let structured = "Suppose \\(X\\) and \\(Y\\) have finite, positive variances \\(\\sigma_X^2\\) and \\(\\sigma_Y^2\\). Define the standardized variables\n\\[U=\\frac{X-\\mathbb{E}[X]}{\\sigma_X}, \\qquad V=\\frac{Y-\\mathbb{E}[Y]}{\\sigma_Y}.\\]\nAssume \\(\\mathbb{E}[UV]=1\\).\n\n**Part A.** Show that \\(\\mathbb{E}[(U-V)^2]=0\\).\n**Part B.** Conclude that \\(Y=aX+b\\) almost surely for some \\(a>0\\), and find \\(a\\) in terms of \\(\\sigma_X\\) and \\(\\sigma_Y\\)."
+        let legacy = "Suppose X and Y have finite, positive variances.\nU=(X-E[X])/σ_X\nShow that Corr(X,Y)=1 implies Y is linear in X."
+        let long = "The sample variance is\n\\[s^2=\\frac{1}{n-1}\\sum_{i=1}^{n}\\left(x_i-\\bar{x}\\right)^2=\\frac{1}{n-1}\\left(\\sum_{i=1}^{n}x_i^2-n\\bar{x}^2\\right)+\\text{an extremely long trailing term that must scroll instead of overflowing the card}\\]\nand for a matrix \\(A\\):\n\\[A=\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix},\\quad \\int_0^1 x^2\\,dx=\\frac13\\]\n\\begin{aligned}a&=b+c\\\\ d&=e\\end{aligned}\nBroken: \\(\\frac{1}{ and a \\(\\unknown{x}\\) span."
+        let ids = [make("Structured", structured), make("Legacy", legacy), make("Long", long)].compactMap { $0 }
+        model.startPractice(questionIds: ids, title: "Math", courseId: c.id)
+        for (i, n) in ["structured", "legacy", "long"].enumerated() { model.snapshotIndex = i; await shot("math-\(n)-dark") }
+        model.setAppearance(.light)
+        for (i, n) in ["structured", "legacy", "long"].enumerated() { model.snapshotIndex = i; await shot("math-\(n)-light") }
+    }
+
     static func chatScenario(_ model: AppModel, dir: URL) async {
         guard let chat = model.chat, let gw = model.gateway, let courses = model.courses, let docs = model.documents, let port = ProcessInfo.processInfo.environment["BRAINCELL_CHAT_PORT"],
               ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
