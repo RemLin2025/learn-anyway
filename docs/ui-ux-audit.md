@@ -47,7 +47,12 @@ Home chat (empty), Courses > Assessments, Library, Question Bank, AI Tasks, Prac
 - `SidebarView` honors `sidebarCollapsed` from `@AppStorage`; first render in the snapshot rig used the collapsed state, so labels were not visible in the first screenshots. Labels and `.help` tooltips exist when expanded.
 - Window `minWidth: 900, minHeight: 560` is set; behavior at that size has not been checked.
 
+## Measured contrast (WCAG ratios, computed from the tokens)
+Before: light `textSecondary` 4.24 on surface, 3.98 on background, 3.69 on elevated; light mastery 3.51, attention 3.60, error 4.07 as text on white (all below 4.5:1). Dark mode passed everywhere (5.07 to 8.57).
+After (this branch): light `textSecondary` 4.57 to 5.26; mastery 4.61 to 5.29; attention 4.93 to 5.66; error 4.68 to 5.38. Dark tokens unchanged. Accent text passes in both modes (5.17 light, 6.32 dark).
+
 ## Corrections to the earlier (UXKIN-style) review
+- "AI Workflow is a long list of near-identical nodes": that was the all-groups-expanded snapshot. The default view is a collapsed group overview, and the canvas already has pinch, Cmd/Opt/Ctrl+scroll zoom, two-finger pan, drag pan, double-click and Cmd+0 fit, and zoom buttons, matching n8n except arrow-key node selection.
 - "Dead 88 px title band": wrong, snapshot artifact (see P1 #1).
 - "Practice progress bar empty": wrong. It shows submitted answers, not position.
 - "Icon-only nav has no labels": wrong. It was the collapsed state.

@@ -11,7 +11,10 @@ Branch: `ui-redesign`.
 | next | `FilterMenu` (themed, replaces AppKit pop-ups) in Question Bank (assessment/skill menus only shown inside a course; cleared when the course changes), Insights, Skills, Usage | Question Bank, Insights, Skills, Usage |
 | this | Usage: four summary tiles (requests, tokens, estimated cost, failed %); Provider Plans and Model Services lists grouped: supported first, "Not supported yet" section | Usage, Provider Plans, Model Services |
 
-Not rendered after the changes: light mode, Skills map, AI Workflow, Library, populated chat, minimum window size.
+| this | Light-mode text tokens darkened to meet 4.5:1 (secondary text, success, warning, error); AI Workflow view switch uses the themed segmented control | Insights in light mode, AI Workflow (dark) |
+
+Not rendered after the changes: Skills map, Library, populated chat, minimum window size, other screens in light mode.
+Decided not to do: Library side preview pane (a Quick Look preview sheet already exists; a pane is a larger layout change with no clear gain), moving the Home "no model" banner (it is the first-run call to action), arrow-key node selection in the workflow canvas, a minimap.
 
 ## Status of phases
 - Phase 1 audit: done (`docs/ui-ux-audit.md`).

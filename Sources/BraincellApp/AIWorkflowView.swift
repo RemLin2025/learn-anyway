@@ -20,7 +20,7 @@ struct AIWorkflowView: View {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
                     HStack {
-                        Picker("View", selection: $mode) { Text("Pipelines").tag("pipeline"); Text("Model map").tag("map") }.pickerStyle(.segmented).labelsHidden().frame(width: 220).accessibilityLabel("Workflow view")
+                        SegmentedControl(selection: $mode, options: ["pipeline", "map"], label: { $0 == "map" ? "Model map" : "Pipelines" }).accessibilityLabel("Workflow view")
                         if mode == "map" { ViewThatFits(in: .horizontal) { fullBar; compactBar } }
                         else { Spacer() }
                     }.padding(.horizontal, Theme.Space.lg).frame(height: 48).controlSize(.small)

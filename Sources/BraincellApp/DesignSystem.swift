@@ -27,16 +27,16 @@ enum Theme {
     static let elevated = Color(light: 0xEEEFF3, dark: 0x292E39)
     static let border = Color(light: 0xE9EAED, dark: 0x2C313B)
     static let textPrimary = Color(light: 0x202124, dark: 0xECEDEF)
-    static let textSecondary = Color(light: 0x777B85, dark: 0x9A9EA8)
+    static let textSecondary = Color(light: 0x686C76, dark: 0x9A9EA8)
     static let accent = Color(light: 0x2563EB, dark: 0x6EA0FF)
     static let accentHover = Color(light: 0x1D4FD0, dark: 0x8DB6FF)
     /// Background of filled buttons that carry white text (4.5:1 or better in both appearances).
     static let accentFill = Color(light: 0x2563EB, dark: 0x2F63D0)
     static let accentFillHover = Color(light: 0x1D4FD0, dark: 0x3B70DE)
-    static let mastery = Color(light: 0x1E9B72, dark: 0x4FC4AD)          // success, readable as text on white
-    static let attention = Color(light: 0xB9792C, dark: 0xE7B363)        // warning, readable as text on white
+    static let mastery = Color(light: 0x177A5A, dark: 0x4FC4AD)          // success; 4.6:1 or better as text on every light surface
+    static let attention = Color(light: 0x8F5C15, dark: 0xE7B363)        // warning; 4.9:1 or better as text on every light surface
     static let warningFill = Color(light: 0xF2B45A, dark: 0xE7B363)
-    static let error = Color(light: 0xD6505A, dark: 0xEE858C)
+    static let error = Color(light: 0xBF3A44, dark: 0xEE858C)
     // The sidebar follows the appearance: a light rail in light mode, a deep neutral rail in dark mode.
     static let sidebar = Color(light: 0xF1F4F9, dark: 0x171A20)
     static let sidebarHover = Color(light: 0xE4E9F2, dark: 0x232831)
