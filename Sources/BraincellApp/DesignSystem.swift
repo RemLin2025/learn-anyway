@@ -375,3 +375,34 @@ struct SegmentedControl<T: Hashable>: View {
         .motion(value: selection).accessibilityElement(children: .contain)
     }
 }
+
+/// Themed filter pop-up: shows the title when nothing is chosen and the choice (in the accent color) when a filter is active.
+/// Replaces AppKit pop-up buttons, which render with system blue chrome beside the app's own controls.
+struct FilterMenu<T: Hashable>: View {
+    let title: String
+    @Binding var selection: T?
+    let options: [(value: T, label: String)]
+    var body: some View {
+        let current = options.first { $0.value == selection }?.label
+        Menu {
+            Button { selection = nil } label: { if selection == nil { Label("Any \(title.lowercased())", systemImage: "checkmark") } else { Text("Any \(title.lowercased())") } }
+            Divider()
+            ForEach(options, id: \.value) { o in
+                Button { selection = o.value } label: { if selection == o.value { Label(o.label, systemImage: "checkmark") } else { Text(o.label) } }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(current ?? title).lineLimit(1)
+                Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold))
+            }
+            .font(.system(.callout, design: .rounded, weight: current == nil ? .regular : .semibold))
+            .foregroundStyle(current == nil ? Theme.textSecondary : Theme.accent)
+            .padding(.horizontal, 10).frame(minHeight: 28)
+            .background(current == nil ? Theme.surface : Theme.accent.opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.button).buttonStyle(.plain).menuIndicator(.hidden).fixedSize()
+        .accessibilityLabel(title).accessibilityValue(current ?? "Any")
+    }
+}

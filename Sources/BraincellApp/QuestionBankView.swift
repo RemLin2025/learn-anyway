@@ -34,6 +34,7 @@ struct QuestionBankView: View {
                 .disabled(rows.isEmpty).help("Practice the selected questions, or everything shown")
         }
         .task(id: model.revision) { load() }
+        .onChange(of: filter.courseId) { _, _ in filter.assessmentId = nil; filter.skillId = nil }   // hidden filters must not keep applying
         .onChange(of: filter) { _, _ in load() }
         .onChange(of: selection) { _, _ in loadDetail() }
         .sheet(item: $editing) { QuestionEditor(detail: $0) }
@@ -49,26 +50,13 @@ struct QuestionBankView: View {
     private var filterControls: some View {
         HStack(spacing: 8) {
             SearchField(prompt: "Search questions", text: $filter.text).frame(width: 200)
-            Picker("Course", selection: $filter.courseId) {
-                Text("All courses").tag(UUID?.none)
-                ForEach(courses) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118)
-            Picker("Assessment", selection: $filter.assessmentId) {
-                Text("Any assessment").tag(UUID?.none)
-                ForEach(assessments) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118).disabled(filter.courseId == nil)
-            Picker("Skill", selection: $filter.skillId) {
-                Text("Any skill").tag(UUID?.none)
-                ForEach(skills) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118).disabled(filter.courseId == nil)
-            Picker("Type", selection: $filter.type) {
-                Text("Any type").tag(QuestionType?.none)
-                ForEach(QuestionType.allCases, id: \.self) { Text($0.label).tag(QuestionType?.some($0)) }
-            }.labelsHidden().frame(width: 118)
-            Picker("Status", selection: $filter.readiness) {
-                Text("Any status").tag(Readiness?.none)
-                ForEach([Readiness.verified, .unverified, .needsReview], id: \.self) { Text($0.label).tag(Readiness?.some($0)) }
-            }.labelsHidden().frame(width: 118)
+            FilterMenu(title: "Course", selection: $filter.courseId, options: courses.map { ($0.id, $0.name) })
+            if filter.courseId != nil {          // assessment and skill only mean something inside one course
+                FilterMenu(title: "Assessment", selection: $filter.assessmentId, options: assessments.map { ($0.id, $0.name) })
+                FilterMenu(title: "Skill", selection: $filter.skillId, options: skills.map { ($0.id, $0.name) })
+            }
+            FilterMenu(title: "Type", selection: $filter.type, options: QuestionType.allCases.map { ($0, $0.label) })
+            FilterMenu(title: "Status", selection: $filter.readiness, options: [Readiness.verified, .unverified, .needsReview].map { ($0, $0.label) })
             Menu {
                 Section("Difficulty") {
                     Button("Any") { filter.minDifficulty = nil; filter.maxDifficulty = nil }
