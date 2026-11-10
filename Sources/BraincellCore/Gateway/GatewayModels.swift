@@ -32,8 +32,16 @@ public struct AIModelRecord: Codable, Identifiable, Hashable, Sendable, Fetchabl
     public var source: String
     public var inputPricePerM: Double?
     public var outputPricePerM: Double?
+    /// User-entered estimate. Never replaces the provider price: it only changes Learn Anyway's local cost estimates.
+    public var customInputPricePerM: Double?
+    public var customOutputPricePerM: Double?
+    /// When the provider price was last read from the provider's catalog (nil for manual or pre-existing rows).
+    public var pricedAt: Date?
     public var health: ModelHealth
     public var createdAt: Date
+    public var effectiveInputPricePerM: Double? { customInputPricePerM ?? inputPricePerM }
+    public var effectiveOutputPricePerM: Double? { customOutputPricePerM ?? outputPricePerM }
+    public var hasCustomPrice: Bool { customInputPricePerM != nil || customOutputPricePerM != nil }
     public init(id: UUID = UUID(), connectionId: UUID, modelId: String, displayName: String, capability: Capability, source: String, inputPricePerM: Double? = nil, outputPricePerM: Double? = nil, health: ModelHealth = .untested, createdAt: Date = Date()) {
         self.id = id; self.connectionId = connectionId; self.modelId = modelId; self.displayName = displayName; self.capability = capability; self.source = source
         self.inputPricePerM = inputPricePerM; self.outputPricePerM = outputPricePerM; self.health = health; self.createdAt = createdAt
@@ -139,8 +147,9 @@ public struct GatewayStore: Sendable {
             for m in discovered {
                 let exists = try AIModelRecord.filter(Column("connectionId") == m.connectionId && Column("modelId") == m.modelId && Column("capability") == m.capability.rawValue).fetchOne(db)
                 if var e = exists {
-                    if e.inputPricePerM == nil, let p = m.inputPricePerM { e.inputPricePerM = p }
-                    if e.outputPricePerM == nil, let p = m.outputPricePerM { e.outputPricePerM = p }
+                    // Provider prices stay current; custom estimates are separate columns and are never touched here.
+                    if let p = m.inputPricePerM, p != e.inputPricePerM { e.inputPricePerM = p; e.pricedAt = Date() }
+                    if let p = m.outputPricePerM, p != e.outputPricePerM { e.outputPricePerM = p; e.pricedAt = Date() }
                     try e.save(db)
                 } else { try m.insert(db) }
             }

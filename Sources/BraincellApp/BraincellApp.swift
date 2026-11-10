@@ -48,6 +48,7 @@ struct BraincellApp: App {
         .defaultSize(width: 1100, height: 720)
 
         .commands {
+            CommandGroup(replacing: .appSettings) { Button("Settings…") { model.openSettings() }.keyboardShortcut(",", modifiers: .command) }
             CommandMenu("Go") {
                 ForEach(Array(SidebarItem.allCases.enumerated()), id: \.element) { i, item in
                     Button(item.rawValue) { model.activeSessionID = nil; model.selection = item }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
@@ -67,9 +68,6 @@ struct BraincellApp: App {
             Label(focus.timer == nil ? "Learn Anyway" : focus.remainingText, systemImage: "timer")
         }
 
-        Settings {
-            SettingsView().environmentObject(model).environmentObject(focus).preferredColorScheme(model.appearance.colorScheme)
-        }
     }
 }
 

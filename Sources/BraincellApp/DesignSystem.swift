@@ -177,6 +177,8 @@ struct PrimaryButtonStyle: ButtonStyle {
                 .font(.system(.body, design: .rounded, weight: .semibold))
                 .foregroundStyle(.white)
                 .padding(.horizontal, 14).padding(.vertical, 7)
+                .frame(minHeight: 28)
+                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .background(configuration.isPressed || hover ? Theme.accentHover : Theme.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .opacity(enabled ? 1 : 0.4)
                 .scaleEffect(configuration.isPressed ? 0.98 : 1)
@@ -198,6 +200,8 @@ struct SecondaryButtonStyle: ButtonStyle {
                 .font(.system(.body, design: .rounded, weight: .medium))
                 .foregroundStyle(Theme.textPrimary)
                 .padding(.horizontal, 12).padding(.vertical, 6)
+                .frame(minHeight: 28)
+                .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .background(configuration.isPressed ? Theme.elevated : (hover ? Theme.background : Theme.surface), in: RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border))
                 .opacity(enabled ? 1 : 0.45)
@@ -288,11 +292,10 @@ struct SidebarView: View {
             .accessibilityElement(children: .combine).accessibilityLabel("Learn Anyway")
 
             ForEach(SidebarItem.allCases) { item in
-                SidebarRow(title: item.rawValue, symbol: item.symbol, collapsed: collapsed, selected: (model.selection ?? .home) == item) { model.selection = item }
+                SidebarRow(title: item.rawValue, symbol: item.symbol, collapsed: collapsed, selected: !model.settingsOpen && (model.selection ?? .home) == item) { model.selection = item }
             }
             Spacer()
-            SettingsLink { SidebarLabel(title: "Settings", symbol: "gearshape", collapsed: collapsed, selected: false, hover: false) }
-                .buttonStyle(.plain).help("Settings")
+            SidebarRow(title: "Settings", symbol: "gearshape", collapsed: collapsed, selected: model.settingsOpen) { model.openSettings() }
             SidebarRow(title: collapsed ? "Expand sidebar" : "Collapse", symbol: collapsed ? "sidebar.right" : "sidebar.left", collapsed: collapsed, selected: false) { collapsed.toggle() }
         }
         .padding(Theme.Space.md)
@@ -353,10 +356,11 @@ struct SegmentedControl<T: Hashable>: View {
         HStack(spacing: 2) {
             ForEach(options, id: \.self) { o in
                 Button { selection = o } label: {
-                    Text(label(o)).font(.system(.callout, design: .rounded, weight: selection == o ? .semibold : .regular))
+                    Text(label(o)).font(.system(.callout, design: .rounded, weight: selection == o ? .semibold : .regular)).lineLimit(1).fixedSize()
                         .foregroundStyle(selection == o ? Theme.textPrimary : Theme.textSecondary)
-                        .padding(.horizontal, 12).padding(.vertical, 5)
+                        .padding(.horizontal, 14).padding(.vertical, 7)
                         .background(selection == o ? Theme.surface : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.control - 3))
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control - 3))
                         .shadow(color: .black.opacity(selection == o ? 0.08 : 0), radius: 2, y: 1)
                 }
                 .buttonStyle(.plain).accessibilityAddTraits(selection == o ? .isSelected : [])

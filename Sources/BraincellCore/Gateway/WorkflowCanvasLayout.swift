@@ -130,7 +130,22 @@ public struct WorkflowCanvasLayout: Sendable {
                 edges.append(VisualEdge(id: "d:\(aId)>\(bId)", from: aId, to: bId, kind: .dependency, points: dedupe(pts)))
             }
         }
-        let bounds = nodes.map(\.rect).reduce(nodes[0].rect) { $0.union($1) }.insetBy(dx: -56, dy: -48)
+        var content = nodes.map(\.rect).reduce(nodes[0].rect) { $0.union($1) }
+        for e in edges { for p in e.points { content = content.union(CGRect(x: p.x, y: p.y, width: 0, height: 0)) } }      // edge runs can leave the node box
+        let bounds = content.insetBy(dx: -56, dy: -48)
         return WorkflowCanvasLayout(nodes: nodes, edges: edges, bounds: bounds, nodeIndex: index)
+    }
+}
+
+
+/// Camera math for "Fit to view": one pure function so it can be tested at any viewport size.
+public enum CanvasFit {
+    /// Scale and pan that centre `bounds` inside `viewport` with `padding`, never zooming in past `maxScale`.
+    /// If the content would need less than `minScale` to fit, it is centred at `minScale` (readability wins over showing everything).
+    public static func transform(bounds: CGRect, viewport: CGSize, minScale: CGFloat = 0.2, maxScale: CGFloat = 1, padding: CGFloat = 20) -> (scale: CGFloat, pan: CGSize) {
+        guard viewport.width > 0, viewport.height > 0, bounds.width > 0, bounds.height > 0 else { return (1, .zero) }
+        let aw = max(1, viewport.width - 2 * padding), ah = max(1, viewport.height - 2 * padding)
+        let s = min(maxScale, max(minScale, min(aw / bounds.width, ah / bounds.height)))
+        return (s, CGSize(width: (viewport.width - bounds.width * s) / 2 - bounds.minX * s, height: (viewport.height - bounds.height * s) / 2 - bounds.minY * s))
     }
 }

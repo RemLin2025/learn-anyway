@@ -11,6 +11,9 @@ final class AIConfig: ObservableObject {
     @Published private(set) var routes: [String: TaskRoute] = [:]
     /// Every task's resolved model, computed from one database read per reload (never per render).
     @Published private(set) var resolutions: [String: Resolution] = [:]
+    /// Which tasks each model actually serves, from the same resolution the router uses (never a separate guess).
+    @Published private(set) var assignments: [UUID: [Assignment]] = [:]
+    @Published private(set) var favorites: Set<String> = Set(UserDefaults.standard.stringArray(forKey: "favoriteModels") ?? [])
     @Published var busy: Set<String> = []
     @Published var message: String?
     @Published var error: String?
@@ -25,6 +28,12 @@ final class AIConfig: ObservableObject {
         defaults = Dictionary(uniqueKeysWithValues: ((try? gw.store.capabilityDefaults()) ?? []).map { ($0.capability, $0) })
         routes = (try? gw.store.routes()) ?? [:]
         resolutions = (try? gw.resolveAll()) ?? [:]
+        var a: [UUID: [Assignment]] = [:]
+        for t in WorkflowTask.all {
+            guard let r = resolutions[t.id], let m = r.primary?.model else { continue }
+            a[m.id, default: []].append(Assignment(task: t, inherited: r.inherited))
+        }
+        assignments = a
         rev += 1
     }
 
@@ -67,6 +76,17 @@ final class AIConfig: ObservableObject {
     func addModel(_ c: AIConnection, id: String, cap: Capability = .llm, inPrice: Double?, outPrice: Double?) {
         let m = AIModelRecord(id: UUID(), connectionId: c.id, modelId: id, displayName: id, capability: cap, source: "manual", inputPricePerM: inPrice, outputPricePerM: outPrice, health: .untested, createdAt: Date())
         try? gw.store.save(m); reload()
+    }
+    struct Assignment: Hashable { let task: WorkflowTask; let inherited: Bool }
+    func assignments(of m: AIModelRecord) -> [Assignment] { assignments[m.id] ?? [] }
+    func toggleFavorite(_ m: AIModelRecord) {
+        if favorites.contains(m.id.uuidString) { favorites.remove(m.id.uuidString) } else { favorites.insert(m.id.uuidString) }
+        UserDefaults.standard.set(Array(favorites), forKey: "favoriteModels")
+    }
+    /// Saves a custom price estimate. Synchronous and throwing, so the caller always gets a definite result.
+    func setCustomPrices(_ m: AIModelRecord, input: Double?, output: Double?) throws {
+        var x = m; x.customInputPricePerM = input; x.customOutputPricePerM = output
+        try gw.store.save(x); reload()
     }
     func update(_ m: AIModelRecord) { try? gw.store.save(m); reload() }
     func remove(_ m: AIModelRecord) {

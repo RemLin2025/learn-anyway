@@ -6,7 +6,7 @@ import BraincellCore
 struct ModelServicesView: View {
     @ObservedObject var cfg: AIConfig
     @Binding var tab: Capability
-    @State private var providerId = "openai"
+    @State private var providerId = ""
     @State private var key = ""
     @State private var baseURL = ""
     @State private var connName = ""
@@ -14,18 +14,23 @@ struct ModelServicesView: View {
     @State private var confirmRemove: AIConnection?
     @State private var confirmTest = false
     @State private var importMissing: [String]?
+    @State private var selectedModel: UUID?
+    @State private var showHelp = false
+    @State private var pendingImport: (export: GatewayConfigExport, summary: [String])?
+    @EnvironmentObject private var app: AppModel
 
     private var providers: [ProviderSpec] { ProviderRegistry.providers(for: tab) }
-    private var spec: ProviderSpec { providers.first { $0.id == providerId } ?? providers.first ?? ProviderRegistry.all[0] }
+    /// Defaults to the first provider that is already connected, so the catalog is what you see first.
+    private var spec: ProviderSpec { providers.first { $0.id == providerId } ?? providers.first { p in cfg.connections.contains { $0.providerId == p.id } } ?? providers.first ?? ProviderRegistry.all[0] }
 
     var body: some View {
         AIPage(title: "Model Services", subtitle: "Credentials, endpoints and model catalogs for every capability.") {
             VStack(spacing: 0) {
-                readiness
+                toolbar
                 tabBar
                 Divider()
                 HStack(alignment: .top, spacing: 0) {
-                    List(providers, selection: Binding(get: { spec.id }, set: { if let v = $0 { providerId = v; key = ""; baseURL = ""; connName = "" } })) { p in
+                    List(providers, selection: Binding(get: { spec.id }, set: { if let v = $0 { providerId = v; key = ""; baseURL = ""; connName = ""; selectedModel = nil } })) { p in
                         HStack(spacing: Theme.Space.md) {
                             ProviderIcon(symbol: p.symbol, size: 30)
                             VStack(alignment: .leading, spacing: 1) {
@@ -35,8 +40,13 @@ struct ModelServicesView: View {
                                           text: !p.supports(tab) ? "Not supported yet" : (c?.status.label ?? "Not configured"))
                             }
                         }.padding(.vertical, 2).tag(p.id).accessibilityElement(children: .combine)
-                    }.sidePanel().frame(width: 270)
-                    ScrollView { detail.padding(Theme.Space.xl).frame(maxWidth: 720, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
+                    }.sidePanel().frame(width: 220)
+                    ScrollView { detail.padding(Theme.Space.xl).frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
+                        .overlay(alignment: .trailing) {
+                            if let id = selectedModel, let m = cfg.models.first(where: { $0.id == id }), let c = cfg.connection(m.connectionId) {
+                                ModelInspector(cfg: cfg, model: m, connection: c) { selectedModel = nil }.shadow(color: .black.opacity(0.15), radius: 8, x: -2).transition(.move(edge: .trailing))
+                            }
+                        }
                 }
             }
         }
@@ -48,6 +58,10 @@ struct ModelServicesView: View {
             Button("Send one tiny request") { testDefault() }
             Button("Cancel", role: .cancel) {}
         } message: { Text("This sends a one-line prompt (a few tokens) to your default LLM. Image, video and other media models are never tested automatically.") }
+        .confirmationDialog("Import these settings?", isPresented: Binding(get: { pendingImport != nil }, set: { if !$0 { pendingImport = nil } }), titleVisibility: .visible) {
+            Button("Merge into current settings") { applyImport() }
+            Button("Cancel", role: .cancel) { pendingImport = nil }
+        } message: { Text((pendingImport?.summary ?? []).joined(separator: "\n")) }
         .alert("Imported", isPresented: Binding(get: { importMissing != nil }, set: { if !$0 { importMissing = nil } })) {
             Button("OK") { importMissing = nil }
         } message: { Text((importMissing ?? []).isEmpty ? "Settings imported." : "Settings imported. Add API keys for: \((importMissing ?? []).joined(separator: ", ")).") }
@@ -55,27 +69,25 @@ struct ModelServicesView: View {
 
     // MARK: Header
 
-    private var readiness: some View {
+    private var toolbar: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Button("Test LLM default…") { confirmTest = true }.disabled(cfg.defaults[.llm] == nil || cfg.busy.contains("testdefault"))
+            Button("Export Settings…") { exportConfig() }
+            Button("Import Settings…") { importConfig() }
+            Button { showHelp.toggle() } label: { Image(systemName: "info.circle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain)
+                .accessibilityLabel("What do Export and Import do?").popover(isPresented: $showHelp, arrowEdge: .bottom) { helpText }
+            Spacer()
+            if let e = cfg.error { Text(e).font(Theme.meta).foregroundStyle(Theme.error).lineLimit(2) } else if let m = cfg.message { Text(m).font(Theme.meta).foregroundStyle(Theme.mastery).lineLimit(2) }
+        }.padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md)
+    }
+
+    private var helpText: some View {
         VStack(alignment: .leading, spacing: Theme.Space.sm) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: Theme.Space.sm) {
-                    ForEach(Capability.allCases) { c in
-                        let r = cfg.readiness(c)
-                        Button { tab = c } label: {
-                            HStack(spacing: 5) { Circle().fill(r.ok ? Theme.mastery : Theme.textSecondary.opacity(0.5)).frame(width: 7, height: 7); Text("\(c.label): \(r.label)").font(Theme.meta) }
-                                .padding(.horizontal, 10).padding(.vertical, 5).background(Theme.surface, in: Capsule()).overlay(Capsule().strokeBorder(Theme.border))
-                        }.buttonStyle(.plain).accessibilityLabel("\(c.label): \(r.label)").accessibilityHint("Opens \(c.label) settings")
-                    }
-                }.padding(.horizontal, Theme.Space.xl)
-            }
-            HStack {
-                Button("Test LLM default…") { confirmTest = true }.disabled(cfg.defaults[.llm] == nil || cfg.busy.contains("testdefault"))
-                Button("Export Settings…") { exportConfig() }
-                Button("Import Settings…") { importConfig() }
-                Spacer()
-                if let e = cfg.error { Text(e).font(Theme.meta).foregroundStyle(Theme.error).lineLimit(2) } else if let m = cfg.message { Text(m).font(Theme.meta).foregroundStyle(Theme.mastery).lineLimit(2) }
-            }.padding(.horizontal, Theme.Space.xl)
-        }.padding(.vertical, Theme.Space.md)
+            Text("Export & Import Settings").font(Theme.cardTitle)
+            Text("**Included:** providers (name, endpoint, enabled), model lists with provider prices and your custom price estimates, default models, and every task’s model, fallback, prompt override and limits.").font(.callout)
+            Text("**Never included:** API keys or any credential. Keys stay in your Keychain, so after importing on another Mac you add them again. Usage history, courses and documents aren’t part of it either.").font(.callout)
+            Text("**Importing merges.** Providers and models that don’t exist yet are added; existing ones are kept (provider prices are refreshed). Defaults and task settings that appear in the file overwrite your current ones; tasks not in the file are untouched. You’ll see a summary and confirm before anything changes.").font(.callout)
+        }.padding(Theme.Space.lg).frame(width: 360)
     }
 
     private var tabBar: some View {
@@ -86,7 +98,7 @@ struct ModelServicesView: View {
                         Label(c.label, systemImage: c.symbol).font(.system(.callout, design: .rounded, weight: tab == c ? .semibold : .regular))
                             .foregroundStyle(tab == c ? Theme.accent : Theme.textSecondary)
                             .padding(.horizontal, 12).padding(.vertical, 7)
-                            .background(tab == c ? Theme.accent.opacity(0.12) : .clear, in: Capsule())
+                            .background(tab == c ? Theme.accent.opacity(0.12) : .clear, in: Capsule()).contentShape(Capsule())
                     }.buttonStyle(.plain).accessibilityAddTraits(tab == c ? .isSelected : [])
                 }
             }.padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.sm)
@@ -140,7 +152,6 @@ struct ModelServicesView: View {
     }
 
     private func connectionCard(_ c: AIConnection) -> some View {
-        let ms = cfg.models(c, tab)
         let def = cfg.defaults[tab]
         return Card {
             VStack(alignment: .leading, spacing: Theme.Space.md) {
@@ -149,51 +160,27 @@ struct ModelServicesView: View {
                     StatusDot(color: c.status.color, text: c.status.label)
                     if def?.connectionId == c.id { Badge(text: "In use", color: Theme.accent) }
                     Spacer()
-                    Button("Refresh") { cfg.refresh(c) }.disabled(cfg.busy.contains("refresh-\(c.id)"))
-                    Button(c.enabled ? "Disable" : "Enable") { cfg.setEnabled(c, !c.enabled) }
-                    Button("Remove…", role: .destructive) { confirmRemove = c }
+                    Menu {
+                        Button("Refresh catalog") { cfg.refresh(c) }.disabled(cfg.busy.contains("refresh-\(c.id)"))
+                        Button(c.enabled ? "Disable" : "Enable") { cfg.setEnabled(c, !c.enabled) }
+                        Divider()
+                        Button("Remove…", role: .destructive) { confirmRemove = c }
+                    } label: { Label("Manage", systemImage: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize()
+                    Button(cfg.busy.contains("refresh-\(c.id)") ? "Refreshing…" : "Refresh") { cfg.refresh(c) }.disabled(cfg.busy.contains("refresh-\(c.id)"))
                 }
-                Text(c.effectiveBaseURL).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.textSecondary).textSelection(.enabled)
-                Text("Models").font(Theme.cardTitle)
-                if ms.isEmpty { Text("No \(tab.label) models yet. Refresh the catalog or add one by id.").foregroundStyle(Theme.textSecondary) }
-                ForEach(ms) { modelRow($0, c, isDefault: def?.connectionId == c.id && def?.modelId == $0.modelId) }
-                HStack {
-                    TextField("Add a model by id", text: $newModel).accessibilityLabel("Model id").onSubmit { add(c) }
-                    Button("Add") { add(c) }.disabled(newModel.trimmed.isEmpty)
+                Text(c.effectiveBaseURL).font(.system(.caption, design: .monospaced)).foregroundStyle(Theme.textSecondary).textSelection(.enabled).lineLimit(1).truncationMode(.middle)
+                ModelTable(cfg: cfg, connection: c, cap: tab, selected: $selectedModel)
+                DisclosureGroup("Add a model by id") {
+                    HStack {
+                        TextField("Model id", text: $newModel).accessibilityLabel("Model id").onSubmit { add(c) }
+                        Button("Add") { add(c) }.disabled(newModel.trimmed.isEmpty)
+                    }.padding(.top, 4)
                 }
-                Text("Prices (USD per million tokens) are optional. OpenRouter fills them in; otherwise cost shows as Unknown, never zero.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             }
         }
     }
 
     private func add(_ c: AIConnection) { cfg.addModel(c, id: newModel.trimmed, cap: tab, inPrice: nil, outPrice: nil); newModel = "" }
-
-    private func modelRow(_ m: AIModelRecord, _ c: AIConnection, isDefault: Bool) -> some View {
-        let (bt, bc) = ModelBadge.text(m, local: c.spec?.isLocal == true)
-        return HStack(spacing: Theme.Space.sm) {
-            Button { cfg.setDefault(tab, c, m.modelId) } label: { Image(systemName: isDefault ? "largecircle.fill.circle" : "circle").foregroundStyle(isDefault ? Theme.accent : Theme.textSecondary) }
-                .buttonStyle(.plain).help("Use as the \(tab.label) default").accessibilityLabel("Default \(tab.label) model").accessibilityValue(isDefault ? "Selected" : "Not selected")
-            Text(m.modelId).font(.system(.callout, design: .monospaced)).lineLimit(1).truncationMode(.middle)
-            Badge(text: bt, color: bc)
-            Spacer()
-            if c.spec?.isLocal != true {
-                priceField("in", m.inputPricePerM) { var x = m; x.inputPricePerM = $0; cfg.update(x) }
-                priceField("out", m.outputPricePerM) { var x = m; x.outputPricePerM = $0; cfg.update(x) }
-            }
-            if tab == .llm, let t = Optional(Target(connection: c, model: m)) {
-                Button(cfg.busy.contains("test-\(m.id)") ? "…" : "Test") { cfg.test(t) }.disabled(cfg.busy.contains("test-\(m.id)"))
-            }
-            Button { cfg.remove(m) } label: { Image(systemName: "trash") }.buttonStyle(.plain).foregroundStyle(Theme.textSecondary).accessibilityLabel("Remove \(m.modelId)")
-        }
-    }
-
-    private func priceField(_ label: String, _ v: Double?, _ set: @escaping (Double?) -> Void) -> some View {
-        HStack(spacing: 3) {
-            Text(label).font(Theme.meta).foregroundStyle(Theme.textSecondary)
-            TextField("$", text: Binding(get: { v.map { String($0) } ?? "" }, set: { set(Double($0)) })).frame(width: 58).multilineTextAlignment(.trailing)
-                .accessibilityLabel("\(label) price per million tokens")
-        }
-    }
 
     private var futureOptions: some View {
         let lines: [Capability: String] = [
@@ -224,11 +211,20 @@ struct ModelServicesView: View {
     }
 
     private func importConfig() {
-        let p = NSOpenPanel(); p.allowedContentTypes = [.json]; p.message = "Imports provider references, models, defaults and routes. You’ll be asked to add API keys afterwards."
+        let p = NSOpenPanel(); p.allowedContentTypes = [.json]; p.message = "Choose a settings export. Nothing changes until you confirm."
         guard p.runModal() == .OK, let url = p.url else { return }
         do {
             let c = try JSONDecoder().decode(GatewayConfigExport.self, from: Data(contentsOf: url))
-            importMissing = try cfg.gw.importConfig(c); cfg.reload()
+            let existingRoutes = (try? cfg.gw.store.routes()) ?? [:]
+            let overwritten = c.routes.filter { r in existingRoutes[r.task].map { !$0.inherit } ?? false }.count
+            let known = Set(cfg.connections.map { "\($0.providerId)/\($0.name)" })
+            let newConns = c.connections.filter { !known.contains("\($0.providerId)/\($0.name)") }.count
+            pendingImport = (c, ["\(c.connections.count) provider(s), \(newConns) new", "\(c.models.count) model(s)", "\(c.defaults.count) default model(s)", "\(c.routes.count) task setting(s), \(overwritten) would overwrite a custom setting you have now", "API keys: none — you’ll add them afterwards"])
         } catch { cfg.error = "That file isn’t a valid settings export." }
+    }
+    private func applyImport() {
+        guard let c = pendingImport?.export else { return }
+        pendingImport = nil
+        do { importMissing = try cfg.gw.importConfig(c); cfg.reload() } catch { cfg.error = "Import failed: \(error.localizedDescription). Nothing was partially applied that you can’t fix by re-importing." }
     }
 }

@@ -41,8 +41,17 @@ final class AppModel: ObservableObject {
     /// Library + course Materials (one store). Soft-deleted items are purged on launch once their seven days are up.
     let library: LibraryService?
 
-    @Published var selection: SidebarItem? = .home
+    @Published var selection: SidebarItem? = .home { didSet { settingsOpen = false } }
+    /// Settings is a destination inside the main window (not a separate NSWindow); the section persists in @AppStorage("settingsSection").
+    @Published var settingsOpen = false
+    let updater = UpdateModel()
+    /// Set by other settings pages; the AI Workflow page selects this task when it appears.
+    @Published var pendingWorkflowTask: String?
+    func openWorkflow(task: String) { pendingWorkflowTask = task; openSettings(.workflow) }
+    func openSettings(_ section: SettingsSection? = nil) { if let section { UserDefaults.standard.set(section.rawValue, forKey: "settingsSection") }; activeSessionID = nil; settingsOpen = true }
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
+    /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
+    lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()
     @Published var selectedCourseID: UUID?
     /// Set to ask for confirmation before deleting this course (from the Courses page or a Library course folder).
     @Published var askDeleteCourse: UUID?

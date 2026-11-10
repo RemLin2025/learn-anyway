@@ -65,6 +65,9 @@ struct ProviderIcon: View {
 }
 
 enum ModelBadge {
+    static func label(_ h: ModelHealth) -> (String, Color) {
+        switch h { case .ready: ("Verified", Theme.mastery); case .failed: ("Failed test", Theme.error); case .untested: ("Untested", Theme.textSecondary) }
+    }
     static func text(_ m: AIModelRecord, local: Bool) -> (String, Color) {
         if local { return ("Local", Theme.accent) }
         switch m.health { case .ready: return ("Ready", Theme.mastery); case .failed: return ("Failed test", Theme.error); case .untested: return ("Untested", Theme.textSecondary) }

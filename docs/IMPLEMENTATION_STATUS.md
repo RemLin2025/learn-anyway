@@ -152,6 +152,9 @@ Shared tokens, `Card`, `PageHeader`, `PrimaryButtonStyle`/`SecondaryButtonStyle`
 ## Library and course Materials
 Migration v12 rebuilds `documents` (ids and columns preserved; `courseId` now optional; adds folder, name, favorite, modified and soft-delete fields) and adds `library_folders` plus course soft-delete columns. The Library page and each course's Materials tab are one browser (`LibraryBrowser`) over the same records: a file belongs to one course folder tree or to the global Library, moves change that record, nothing is copied. Course deletion is a seven-day soft delete (reuses the archived exclusion every study screen honours); expiry runs at launch via an injectable clock. **Deliberate deviation:** purging a course removes its materials and folders only, because learning evidence tables are `ON DELETE RESTRICT` (append-only); the hidden course row and its study history stay. The Plan tab and `StudyPlanView` were removed (the planner behind Home's recommendation is unchanged). Not built: drag-to-move between folders (use Move…), Reveal in Finder shows the stored `original.ext` name, video/other files are previewed by Quick Look only. Checked by 13 new tests and rendered snapshots; interactions (menus, drag-drop import, panels, Quick Look sheet) were never clicked.
 
+## Home chat assistant
+Home is a persistent chat (migration v13: `chat_conversations`, `chat_messages`, `agent_actions`, `study_plans`). `AgentRunner` (BraincellCore/Agent) builds the prompt, calls the model through `AIGateway` (new routable task `chatAssistant`, so Settings → AI Workflow/Model Services control it), parses one JSON tool call per reply, validates it against `AgentRegistry`, enforces approval for every write/destructive tool, runs it against the existing services, and records the real result. Tools: courses.list/get/create/rename/delete, assessments.create, library.search, materials.list/read/attachToCourse, questions.search/generate/save, insights.getWeakTopics, studyPlans.create/get, aiTasks.list, quickCram.start, ui.suggestActions/requestFiles. Question drafts are validated and previewed; Save commits through the existing import. Study plans are saved artifacts built by the existing `PlannerService`; there is no Plan page. Idempotency: one `agent_actions` row per (conversation, turn, tool, args); step budget 6 tool calls per request. **Not built:** streaming, native function-calling (tool calls are JSON in text, so any LLM works), model-written summaries of old history (older messages are dropped with a notice), the manual ChatGPT Bridge as a chat backend (it can't run tools; the UI says so). Verified by 22 tests with a scripted model over the real services, and by driving the real UI against a local scripted HTTP model; never run with a live hosted model.
+
 ## Known limitations / deferred
 - No OCR; PowerPoint not supported (rejected with a clear message).
 - **Not built:** a mock-exam mode (sessions can be flagged `timed`, which suppresses coaching, but nothing creates one), XP/level animations (optional), OCR, and PowerPoint import. The coach has no separate focus-interval trigger: the end-of-interval prompt (finish the question / take a break) covers that moment. Estimator constants are heuristics, not calibrated against a real learner. Math covers a LaTeX subset (no matrices/aligned environments); unsupported input shows its source.
@@ -163,3 +166,16 @@ On-device AI and advanced question interactions (M8, see above), a mock-exam mod
 
 (Superseded plan text follows.)
 M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adaptive learning → M7 release polish → M8 post-MVP.
+
+## Settings redesign
+- Settings is a destination inside the main window (`AppModel.settingsOpen`; ⌘, and the sidebar row open it); the separate `Settings` scene is gone.
+- Model Services: lazy, debounced, cancellable model table (`ModelListModel`, `ModelCatalog.filter`), model inspector, custom price estimates stored in separate columns (migration v14) so provider prices never get overwritten.
+- AI Workflow: new Pipelines view from `WorkflowPipeline` (real flows only); Model map kept; Fit uses `CanvasFit`. Task inspector has Overview / Configuration with prompt override.
+- Usage: two primary cards, SQL aggregates (`UsageService.totals/slices/page/dailyTotals`).
+- Not verified by hand: mouse clicks on every control, drag/pan feel, VoiceOver. Context window and live execution traces are not available in the data.
+
+## In-app updates
+- `scripts/install-macos.sh` stamps `SourceRoot` and `SourceFingerprint` (content hash from `scripts/source-fingerprint.sh`) into the installed app's Info.plist.
+- On launch (toggle in Settings → General → Updates) `UpdateModel` compares the stamp with the source folder and, when the branch tracks a remote, runs `git fetch`. A bottom banner offers Update now / Later.
+- Update now: optional `git pull --ff-only`, then the install script rebuilds in the background; when ready the app quits itself and the script swaps `/Applications/Learn Anyway.app` and relaunches. Failures leave the current app untouched and show the log tail.
+- Verified: detection and banner (test bundle with a stale fingerprint). Not run end to end: the actual rebuild, swap and relaunch.

@@ -132,8 +132,8 @@ struct PillTabs<T: Hashable>: View {
                 ForEach(options, id: \.self) { o in
                     Button { selection = o } label: {
                         Text(label(o)).font(.system(.callout, design: .rounded, weight: selection == o ? .semibold : .regular)).lineLimit(1).fixedSize()
-                            .foregroundStyle(selection == o ? Theme.textPrimary : Theme.textSecondary).padding(.horizontal, 14).padding(.vertical, 6)
-                            .background(selection == o ? Theme.elevated : .clear, in: Capsule())
+                            .foregroundStyle(selection == o ? Theme.textPrimary : Theme.textSecondary).padding(.horizontal, 16).padding(.vertical, 8)
+                            .background(selection == o ? Theme.elevated : .clear, in: Capsule()).contentShape(Capsule())
                     }.buttonStyle(.plain).accessibilityAddTraits(selection == o ? .isSelected : [])
                 }
             }

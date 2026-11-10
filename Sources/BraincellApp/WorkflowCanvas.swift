@@ -155,14 +155,8 @@ final class WorkflowState: ObservableObject {
     static func symbol(_ g: TaskGroup) -> String {
         switch g { case .core: "square.stack.3d.up"; case .study: "rectangle.on.rectangle"; case .research: "doc.text.magnifyingglass"; case .media: "photo.on.rectangle"; case .experience: "graduationcap" }
     }
-    /// What "fit" frames: the whole graph when that stays readable, otherwise the compact overview (default + categories), never every expanded task.
-    func fitRect(viewport v: CGSize) -> CGRect {
-        let full = layout.bounds
-        guard v.width > 0, v.height > 0 else { return full }
-        if min(v.width / full.width, v.height / full.height) >= 0.65 { return full }
-        let top = layout.nodes.filter { if case .task = $0.kind { return false }; return true }.map(\.rect)
-        return top.dropFirst().reduce(top[0]) { $0.union($1) }.insetBy(dx: -56, dy: -48)
-    }
+    /// "Fit" always frames the whole graph (nodes and edge runs); the camera math clamps the zoom, it never drops nodes from view.
+    func fitRect(viewport v: CGSize) -> CGRect { layout.bounds }
     func tasks(in g: TaskGroup) -> [WorkflowTask] { WorkflowTask.all.filter { $0.group == g } }
 }
 
@@ -179,7 +173,7 @@ final class Viewport: ObservableObject {
     /// True until the learner moves or zooms the camera: while true, window resizes re-frame the overview.
     var autoFit = false
     private var saveItem: DispatchWorkItem?
-    static let minScale: CGFloat = 0.4, maxScale: CGFloat = 1.8
+    static let minScale: CGFloat = 0.2, maxScale: CGFloat = 1.8
 
     init() {
         if let a = UserDefaults.standard.array(forKey: "wf.cam") as? [Double], a.count == 3 { pan = CGSize(width: a[0], height: a[1]); scale = a[2]; hasCamera = true }
@@ -194,11 +188,12 @@ final class Viewport: ObservableObject {
     }
     func pan(by d: CGSize) { autoFit = false; pan = CGSize(width: pan.width + d.width, height: pan.height + d.height); persistSoon() }
 
-    /// Fits the visible graph at a readable zoom (never below `minScale` or above 1×) and centres it horizontally.
+    /// Fits the whole graph in the current viewport, centred on both axes (see `CanvasFit`).
     func fit(_ b: CGRect) {
         guard size.width > 0, b.width > 0 else { return }
-        let s = min(1, max(0.6, min(size.width / b.width, size.height / b.height) * 0.97))   // never below 0.6: text must stay readable
-        scale = s; pan = CGSize(width: (size.width - b.width * s) / 2 - b.minX * s, height: 10 - b.minY * s)
+        var b = b; b.size.height += 64 / max(scale, 0.2)      // keep the last row clear of the zoom controls
+        let t = CanvasFit.transform(bounds: b, viewport: size, minScale: Self.minScale, maxScale: 1)
+        scale = t.scale; pan = t.pan
         hasCamera = true; persistSoon()
     }
     func reveal(_ r: CGRect) {

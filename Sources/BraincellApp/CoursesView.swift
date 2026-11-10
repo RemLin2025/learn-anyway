@@ -82,24 +82,31 @@ struct CourseDetailView: View {
     @State private var showRename = false
     @State private var renameText = ""
 
+    private var titleBlock: some View {
+        HStack(spacing: Theme.Space.sm) {
+            Text(course.name).font(Theme.pageTitle).lineLimit(1)
+            if course.kind == .quickCram { Badge(text: "Quick Cram", color: Theme.attention) }
+            if let x = try? model.progression?.courseXP(course.id), x.xp > 0 { Badge(text: "Level \(x.level) · \(x.xp) XP") }
+        }
+    }
+    private var tabs: some View { SegmentedControl(selection: $tab, options: Tab.allCases) { $0.rawValue } }
+    private var actions: some View {
+        HStack(spacing: Theme.Space.md) {
+            Button { model.practiceCourse(course) } label: { Label("Practice", systemImage: "play.fill").lineLimit(1).fixedSize() }.buttonStyle(.primary)
+            Menu {
+                Button("Rename…") { renameText = course.name; showRename = true }
+                Divider()
+                Button("Delete Course…", role: .destructive) { model.askDeleteCourse = course.id }
+            } label: { Image(systemName: "ellipsis.circle").frame(width: 34, height: 30).contentShape(Rectangle()) }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Course actions")
+            if course.kind == .quickCram { Button("Convert to Course…") { convertName = course.name; showConvert = true } }
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Text(course.name).font(Theme.pageTitle)
-                    if course.kind == .quickCram { Badge(text: "Quick Cram", color: Theme.attention) }
-                    if let x = try? model.progression?.courseXP(course.id), x.xp > 0 { Badge(text: "Level \(x.level) · \(x.xp) XP") }
-                    Spacer()
-                    Button { model.practiceCourse(course) } label: { Label("Practice", systemImage: "play.fill") }
-                        .buttonStyle(.primary)
-                    Menu {
-                        Button("Rename…") { renameText = course.name; showRename = true }
-                        Divider()
-                        Button("Delete Course…", role: .destructive) { model.askDeleteCourse = course.id }
-                    } label: { Image(systemName: "ellipsis.circle") }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("Course actions")
-                    if course.kind == .quickCram { Button("Convert to Course…") { convertName = course.name; showConvert = true } }
-                }
-                SegmentedControl(selection: $tab, options: Tab.allCases) { $0.rawValue }
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: Theme.Space.lg) { titleBlock.fixedSize(); tabs; Spacer(minLength: Theme.Space.md); actions }        // one line when it fits
+                VStack(alignment: .leading, spacing: 10) { HStack { titleBlock; Spacer(); actions }; tabs }                         // narrow windows keep two
             }
             .padding([.horizontal, .top], 20).padding(.bottom, 12)
             .controlStrip()
@@ -326,8 +333,8 @@ struct MaterialsTab: View {
     let course: Course
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Add and organize documents, images, videos, and other learning resources for this course. Your materials are also available in Library.")
-                .font(.callout).foregroundStyle(Theme.textSecondary).padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.md)
+            Text("Documents, images and videos for this course. They also appear in Library.")
+                .font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1).padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.sm)
             LibraryBrowser(base: .course(course.id)).id(course.id)
         }
     }

@@ -10,6 +10,8 @@ struct AIWorkflowView: View {
     @State private var vp = Viewport()      // @State, not @StateObject: the page must NOT re-render on every pan/zoom tick
     @State private var confirmResetAll = false
     @State private var showLegend = false
+    @AppStorage("wf.mode") private var mode = "pipeline"
+    @EnvironmentObject private var app: AppModel
 
     init(cfg: AIConfig) { self.cfg = cfg; _state = StateObject(wrappedValue: WorkflowState(cfg: cfg)) }
 
@@ -17,12 +19,15 @@ struct AIWorkflowView: View {
         AIPage(title: "AI Workflow", compact: true) {
             HStack(spacing: 0) {
                 VStack(spacing: 0) {
-                    ViewThatFits(in: .horizontal) { fullBar; compactBar }
-                        .padding(.horizontal, Theme.Space.lg).frame(height: 48).controlSize(.small)
+                    HStack {
+                        Picker("View", selection: $mode) { Text("Pipelines").tag("pipeline"); Text("Model map").tag("map") }.pickerStyle(.segmented).labelsHidden().frame(width: 220).accessibilityLabel("Workflow view")
+                        if mode == "map" { ViewThatFits(in: .horizontal) { fullBar; compactBar } }
+                        else { Spacer() }
+                    }.padding(.horizontal, Theme.Space.lg).frame(height: 48).controlSize(.small)
                     Divider()
-                    WorkflowCanvas(state: state, vp: vp)
+                    if mode == "pipeline" { PipelineView(cfg: cfg) } else { WorkflowCanvas(state: state, vp: vp) }
                 }
-                if let s = state.selected {
+                if mode == "map", let s = state.selected {
                     Divider()
                     ScrollView {
                         inspector(s).padding(Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
@@ -30,6 +35,7 @@ struct AIWorkflowView: View {
                 }
             }
         }
+        .onAppear { if let t = app.pendingWorkflowTask { app.pendingWorkflowTask = nil; mode = "map"; state.select(t) } }
         // Wait a beat so the inspector has resized the canvas before deciding whether the node is on screen.
         .task(id: "\(state.selected ?? "")-\(state.layout.nodeIndex.count)") {
             try? await Task.sleep(nanoseconds: 80_000_000)
@@ -204,40 +210,96 @@ struct ModelPicker: View {
 
 private struct TaskInspector: View {
     @ObservedObject var cfg: AIConfig
-    let state: WorkflowState
+    let state: WorkflowState?
     let task: WorkflowTask
     @State private var route: TaskRoute
+    @State private var draft: String
+    @State private var tab = 0
     @State private var confirmReset = false
 
-    init(cfg: AIConfig, state: WorkflowState, task: WorkflowTask) {
-        self.cfg = cfg; self.state = state; self.task = task; _route = State(initialValue: cfg.route(task))
+    init(cfg: AIConfig, state: WorkflowState?, task: WorkflowTask) {
+        self.cfg = cfg; self.state = state; self.task = task
+        let r = cfg.route(task); _route = State(initialValue: r); _draft = State(initialValue: r.instruction ?? "")
     }
     private func commit() { cfg.save(route) }
+    private var llm: Bool { task.capability == .llm }
+    private var promptTooLong: Bool { draft.count > 4000 }
+    private var promptDirty: Bool { draft != (cfg.route(task).instruction ?? "") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Label(task.title, systemImage: task.capability.symbol).font(Theme.sectionTitle)
+            Picker("Section", selection: $tab) { Text("Overview").tag(0); Text("Configuration").tag(1) }.pickerStyle(.segmented).labelsHidden()
+            if tab == 0 { overview } else { configuration }
+        }
+        .confirmationDialog("Reset \(task.title)?", isPresented: $confirmReset, titleVisibility: .visible) {
+            Button("Reset", role: .destructive) { cfg.reset(task.id); route = TaskRoute(task: task.id); draft = "" }
+            Button("Cancel", role: .cancel) {}
+        } message: { Text("Its own model, fallback, prompt and manual-bridge setting are removed; it follows the default again.") }
+    }
+
+    // MARK: Overview
+
+    private var overview: some View {
+        let res = cfg.resolution(task)
+        let pipes = WorkflowPipeline.all.filter { $0.modelTaskIds.contains(task.id) }
+        let used = ((try? cfg.gw.usage.slices(.all, by: .task, limit: 200)) ?? []).first { $0.key == task.id }
+        return VStack(alignment: .leading, spacing: Theme.Space.md) {
+            Text(task.summary).foregroundStyle(Theme.textSecondary)
+            HStack { Badge(text: task.capability.label); if task.optional { Badge(text: "Optional stage", color: Theme.textSecondary) } }
+            section("Current model") {
+                if res.manual { Text("Manual ChatGPT Bridge: you copy the request into ChatGPT and import the reply.") }
+                else if let p = res.primary { Text("\(p.model.displayName) · \(p.connection.name)").font(.system(.callout, design: .rounded, weight: .semibold)); Text(res.inherited ? "Inherited from the \(task.capability.label) default." : "Set on this task.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                else { Text(res.problem ?? "Not configured.").foregroundStyle(Theme.attention) }
+            }
+            section("When it runs") {
+                if pipes.isEmpty { Text("No workflow in this build calls this task yet. You can pick its model now; it takes effect once a feature uses it.").foregroundStyle(Theme.textSecondary) }
+                ForEach(pipes) { p in Text("• \(p.title)") }
+                if let used { Text("\(used.requests) request(s) recorded\(used.errors > 0 ? ", \(used.errors) failed" : "").").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                else if !pipes.isEmpty { Text("No requests recorded yet.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            }
+            if let p = pipes.first, let step = p.steps.first(where: { $0.id == task.id }) {
+                let byId = Dictionary(uniqueKeysWithValues: p.steps.map { ($0.id, $0) })
+                section("Inputs and outputs") {
+                    Text("Input: " + (step.after.compactMap { byId[$0]?.title }.joined(separator: ", ").nilIfEmpty ?? "your request"))
+                    Text("Output: " + (p.steps.filter { $0.after.contains(step.id) }.map(\.title).joined(separator: ", ").nilIfEmpty ?? "the final result"))
+                }
+            }
+            section("Prompt") {
+                Text("Learn Anyway builds this task’s prompt for each request from your course data, so it has no single fixed text. " + (route.instruction.map { _ in "Your instruction below is added as a system prompt." } ?? "You haven’t added a custom instruction."))
+                if let ins = route.instruction, !ins.isEmpty { Text(ins).font(.system(.caption, design: .monospaced)).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Theme.elevated.opacity(0.6), in: RoundedRectangle(cornerRadius: 8)).textSelection(.enabled) }
+            }
+            connections
+            section("Why this model") {
+                ForEach(Array(res.trace.enumerated()), id: \.offset) { Text("• " + $0.element).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            }
+        }
+    }
+
+    private func section<C: View>(_ t: String, @ViewBuilder _ c: () -> C) -> some View {
+        VStack(alignment: .leading, spacing: 4) { Text(t).font(Theme.cardTitle); c().font(.callout) }
+    }
 
     /// Plain-language reading of this node's lines on the canvas.
     private var connections: some View {
         let res = cfg.resolution(task)
         let feeds = WorkflowTask.all.filter { $0.dependsOn.contains(task.id) }
         return VStack(alignment: .leading, spacing: 4) {
-            Text("Connections").font(Theme.cardTitle)
+            Text("Declared dependencies").font(Theme.cardTitle)
             if task.capability == .llm {
                 Label(route.manualBridge ? "Not connected to the default: uses the manual ChatGPT Bridge." : (res.inherited ? "Purple line: follows the Default Model." : "No purple line: this task has its own model setting."), systemImage: "line.diagonal").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             } else { Label("Uses the \(task.capability.label) default, not the LLM default.", systemImage: "line.diagonal").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
-            if !task.dependsOn.isEmpty { Label("Dashed line: needs output of \(task.dependsOn.compactMap { WorkflowTask.find($0)?.title }.joined(separator: ", ")).", systemImage: "arrow.down.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
-            if !feeds.isEmpty { Label("Dashed line: feeds \(feeds.map(\.title).joined(separator: ", ")).", systemImage: "arrow.up.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
-            if task.dependsOn.isEmpty && feeds.isEmpty { Text("No workflow dependencies.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if !task.dependsOn.isEmpty { Label("Dashed line: declared to need \(task.dependsOn.compactMap { WorkflowTask.find($0)?.title }.joined(separator: ", ")). This describes the intended order; it isn’t enforced unless a pipeline runs it.", systemImage: "arrow.down.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if !feeds.isEmpty { Label("Dashed line: declared to feed \(feeds.map(\.title).joined(separator: ", ")).", systemImage: "arrow.up.right").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if task.dependsOn.isEmpty && feeds.isEmpty { Text("No declared dependencies.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
         }
     }
 
-    var body: some View {
-        let res = cfg.resolution(task)
-        let llm = task.capability == .llm
-        VStack(alignment: .leading, spacing: Theme.Space.md) {
-            Label(task.title, systemImage: task.capability.symbol).font(Theme.sectionTitle)
-            Text(task.summary).foregroundStyle(Theme.textSecondary)
-            HStack { Badge(text: task.capability.label); if task.optional { Badge(text: "Optional stage", color: Theme.textSecondary) } }
-            connections
+    // MARK: Configuration
 
+    private var configuration: some View {
+        let res = cfg.resolution(task)
+        return VStack(alignment: .leading, spacing: Theme.Space.md) {
             if llm {
                 Toggle("Use the manual ChatGPT Bridge", isOn: Binding(get: { route.manualBridge }, set: { route.manualBridge = $0; commit() }))
                 Text(route.manualBridge ? "Requests for this task pause until you copy them into ChatGPT yourself and import the reply. Nothing is sent automatically and nothing is counted as API usage." : "Optional. Keeps this task on your ChatGPT subscription, manually.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
@@ -254,37 +316,134 @@ private struct TaskInspector: View {
                     ModelPicker(cfg: cfg, cap: task.capability, connection: Binding(get: { route.connectionId }, set: { route.connectionId = $0; route.modelId = $0.flatMap { cfg.connection($0) }.flatMap { cfg.models($0, task.capability).first?.modelId }; commit() }),
                                 model: Binding(get: { route.modelId }, set: { route.modelId = $0; commit() }))
                 }
-                Text("Fallback (optional)").font(Theme.cardTitle)
-                ModelPicker(cfg: cfg, cap: task.capability, connection: Binding(get: { route.fallbackConnectionId }, set: { route.fallbackConnectionId = $0; route.fallbackModelId = $0.flatMap { cfg.connection($0) }.flatMap { cfg.models($0, task.capability).first?.modelId }; commit() }),
-                            model: Binding(get: { route.fallbackModelId }, set: { route.fallbackModelId = $0; commit() }))
-                Stepper("Retries on temporary errors: \(route.maxRetries)", value: Binding(get: { route.maxRetries }, set: { route.maxRetries = $0; commit() }), in: 0...3)
-                Stepper("Timeout: \(route.timeoutSeconds) s", value: Binding(get: { route.timeoutSeconds }, set: { route.timeoutSeconds = $0; commit() }), in: 10...600, step: 10)
-                Text("Retries only cover rate limits, timeouts and server errors, never bad keys or budget blocks. The ceiling is 3.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             }
-            if llm && !route.manualBridge {
-                Toggle("Custom temperature", isOn: Binding(get: { route.temperature != nil }, set: { route.temperature = $0 ? 0.7 : nil; commit() }))
-                if let t = route.temperature { Slider(value: Binding(get: { t }, set: { route.temperature = $0 }), in: 0...2, onEditingChanged: { if !$0 { commit() } }); Text(String(format: "%.1f", t)).font(Theme.meta) }
-                Toggle("Limit output tokens", isOn: Binding(get: { route.maxTokens != nil }, set: { route.maxTokens = $0 ? 4096 : nil; commit() }))
-                if let m = route.maxTokens { Stepper("\(m) tokens", value: Binding(get: { m }, set: { route.maxTokens = $0; commit() }), in: 256...32768, step: 256) }
-                Text("Instruction (added as a system prompt)").font(Theme.cardTitle)
-                TextEditor(text: Binding(get: { route.instruction ?? "" }, set: { route.instruction = $0.isEmpty ? nil : $0 })).font(.callout).frame(height: 80).fieldSurface().onSubmit(commit)
-                Button("Save instruction") { commit() }
-            }
+            if llm && !route.manualBridge { promptEditor }
             if !llm { Notice(text: "\(task.capability.label) has no working adapter in this build, so this task can’t run yet. Its status stays “Not available yet”.", tint: Theme.attention, symbol: "exclamationmark.triangle") }
-            Divider()
-            Text("Why this model").font(Theme.cardTitle)
-            ForEach(Array(res.trace.enumerated()), id: \.offset) { Text("• " + $0.element).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            if !route.manualBridge { DisclosureGroup("Advanced settings") { advanced.padding(.top, 6) } }
             if let p = res.problem { Text(p).font(.callout).foregroundStyle(Theme.attention) }
             if let e = cfg.error { Text(e).font(Theme.meta).foregroundStyle(Theme.error) } else if let m = cfg.message { Text(m).font(Theme.meta).foregroundStyle(Theme.mastery) }
             HStack {
-                Button("Test node") { if let p = res.primary { cfg.test(p) } }.disabled(res.primary == nil || !llm || cfg.busy.contains("test-\(res.primary?.model.id.uuidString ?? "")"))
+                Button(cfg.busy.contains("test-\(res.primary?.model.id.uuidString ?? "")") ? "Testing…" : "Test task") { if let p = res.primary { cfg.test(p) } }.disabled(res.primary == nil || !llm || cfg.busy.contains("test-\(res.primary?.model.id.uuidString ?? "")"))
                     .help(llm ? "Sends one tiny request to the resolved model" : "No adapter for this capability yet")
                 Button("Reset to default…") { confirmReset = true }
             }
         }
-        .confirmationDialog("Reset \(task.title)?", isPresented: $confirmReset, titleVisibility: .visible) {
-            Button("Reset", role: .destructive) { cfg.reset(task.id); route = TaskRoute(task: task.id) }
-            Button("Cancel", role: .cancel) {}
-        } message: { Text("Its own model, fallback, prompt and manual-bridge setting are removed; it follows the default again.") }
+    }
+
+    private var promptEditor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Custom instruction").font(Theme.cardTitle)
+            Text("Added after Learn Anyway’s built-in prompt as system guidance. Changing it can change the quality and format of results. It’s stored separately, so app updates never overwrite it.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+            TextEditor(text: $draft).font(.callout).frame(height: 90).fieldSurface()
+            HStack {
+                Text("\(draft.count)/4000").font(Theme.meta).foregroundStyle(promptTooLong ? Theme.error : Theme.textSecondary)
+                Spacer()
+                Button("Cancel") { draft = route.instruction ?? "" }.disabled(!promptDirty)
+                Button("Restore default") { draft = ""; route.instruction = nil; commit() }.disabled(route.instruction == nil && draft.isEmpty)
+                Button("Save") { route.instruction = draft.trimmingCharacters(in: .whitespacesAndNewlines).nilIfEmpty; commit(); draft = route.instruction ?? "" }.buttonStyle(.primary).disabled(!promptDirty || promptTooLong)
+            }
+            if promptTooLong { Text("Keep it under 4000 characters.").font(Theme.meta).foregroundStyle(Theme.error) }
+        }
+    }
+
+    private var advanced: some View {
+        VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text("Fallback model (optional)").font(.system(.subheadline, design: .rounded, weight: .semibold))
+            ModelPicker(cfg: cfg, cap: task.capability, connection: Binding(get: { route.fallbackConnectionId }, set: { route.fallbackConnectionId = $0; route.fallbackModelId = $0.flatMap { cfg.connection($0) }.flatMap { cfg.models($0, task.capability).first?.modelId }; commit() }),
+                        model: Binding(get: { route.fallbackModelId }, set: { route.fallbackModelId = $0; commit() }))
+            Text("A fallback is only used when you set one, and only for temporary failures. Nothing silently switches to a paid model.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+            Stepper("Retries on temporary errors: \(route.maxRetries)", value: Binding(get: { route.maxRetries }, set: { route.maxRetries = $0; commit() }), in: 0...3)
+            Stepper("Timeout: \(route.timeoutSeconds) s", value: Binding(get: { route.timeoutSeconds }, set: { route.timeoutSeconds = $0; commit() }), in: 10...600, step: 10)
+            if llm {
+                Toggle("Custom temperature", isOn: Binding(get: { route.temperature != nil }, set: { route.temperature = $0 ? 0.7 : nil; commit() }))
+                if let t = route.temperature { Slider(value: Binding(get: { t }, set: { route.temperature = $0 }), in: 0...2, onEditingChanged: { if !$0 { commit() } }); Text(String(format: "%.1f", t)).font(Theme.meta) }
+                else { Text("Effective: the provider’s default.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                Toggle("Limit output tokens", isOn: Binding(get: { route.maxTokens != nil }, set: { route.maxTokens = $0 ? 4096 : nil; commit() }))
+                if let m = route.maxTokens { Stepper("\(m) tokens", value: Binding(get: { m }, set: { route.maxTokens = $0; commit() }), in: 256...32768, step: 256) }
+                else { Text("Effective: no limit set by the app.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+            }
+            Text("Retries cover rate limits, timeouts and server errors, never bad keys or budget blocks. Top-p and other provider-specific parameters aren’t exposed because the gateway doesn’t send them.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+        }
+    }
+}
+
+// MARK: Pipelines
+
+/// Shows the real execution flows (core `WorkflowPipeline`), one at a time, as readable cards. Model assignment is read live from the router.
+struct PipelineView: View {
+    @ObservedObject var cfg: AIConfig
+    @AppStorage("wf.pipeline") private var pipelineId = WorkflowPipeline.all[0].id
+    @State private var selected: String?
+    private var pipeline: WorkflowPipeline { WorkflowPipeline.all.first { $0.id == pipelineId } ?? WorkflowPipeline.all[0] }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: Theme.Space.md) {
+                    Picker("Workflow", selection: $pipelineId) { ForEach(WorkflowPipeline.all) { Text($0.title).tag($0.id) } }.labelsHidden().fixedSize().accessibilityLabel("Workflow")
+                    Text(pipeline.summary).font(.callout).foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center).frame(maxWidth: 420)
+                    Text("Configuration view: shows what runs and in what order, not a live run.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    ForEach(Array(pipeline.layers.enumerated()), id: \.offset) { i, layer in
+                        if i > 0 { Image(systemName: "arrow.down").font(.caption).foregroundStyle(Theme.accent).accessibilityHidden(true) }
+                        HStack(alignment: .top, spacing: Theme.Space.md) { ForEach(layer) { node($0) } }
+                    }
+                    let unwired = WorkflowPipeline.unwiredTaskIds.compactMap { WorkflowTask.find($0)?.title }
+                    DisclosureGroup("\(unwired.count) tasks aren’t part of any workflow yet") {
+                        Text(unwired.joined(separator: ", ") + ". You can assign them a model in Model map, but no feature calls them yet.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    }.font(.callout).frame(maxWidth: 420).padding(.top, Theme.Space.lg)
+                    Text("Source: \(pipeline.source)").font(.system(size: 10)).foregroundStyle(Theme.textSecondary)
+                }.padding(Theme.Space.xl).frame(maxWidth: .infinity)
+            }
+            if let s = selected, let step = pipeline.steps.first(where: { $0.id == s }) {
+                Divider()
+                ScrollView {
+                    VStack(alignment: .leading, spacing: Theme.Space.md) {
+                        HStack { Spacer(); Button { selected = nil } label: { Image(systemName: "xmark").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.plain).accessibilityLabel("Close inspector") }
+                        switch step.kind {
+                        case .model(let t): if let task = WorkflowTask.find(t) { TaskInspector(cfg: cfg, state: nil, task: task).id(t) }
+                        case .local(let title, let detail):
+                            Label(title, systemImage: step.needsApproval ? "hand.raised" : "gearshape").font(Theme.sectionTitle)
+                            Text(detail).foregroundStyle(Theme.textSecondary)
+                            Text("This step runs inside Learn Anyway and doesn’t use a model, so there’s nothing to configure.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                        }
+                    }.padding(Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
+                }.frame(width: 340).background(Theme.surface)
+            }
+        }
+        .onChange(of: pipelineId) { _, _ in selected = nil }
+    }
+
+    private func node(_ s: PipelineStep) -> some View {
+        Button { selected = selected == s.id ? nil : s.id } label: {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack {
+                    Text(s.title).font(.system(.headline, design: .rounded, weight: .semibold)).lineLimit(2)
+                    Spacer(minLength: 4)
+                    if s.optional { Badge(text: "Optional", color: Theme.textSecondary) }
+                    if s.needsApproval { Image(systemName: "hand.raised.fill").foregroundStyle(Theme.attention).help("Waits for you") }
+                }
+                switch s.kind {
+                case .model(let t):
+                    if let task = WorkflowTask.find(t) {
+                        let r = cfg.resolution(task)
+                        HStack(spacing: 5) { Image(systemName: "cpu").foregroundStyle(Theme.accent); Text(r.manual ? "Manual ChatGPT Bridge" : (r.primary?.model.displayName ?? "No model")).lineLimit(1) }.font(.callout)
+                        if let p = r.primary { Text(p.connection.name).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                        Text(status(r, task)).font(Theme.meta).foregroundStyle(r.isReady ? Theme.textSecondary : Theme.attention)
+                    }
+                case .local(_, let d): Text(d).font(Theme.meta).foregroundStyle(Theme.textSecondary).lineLimit(3)
+                }
+                if let n = s.note { Text(n).font(Theme.meta).italic().foregroundStyle(Theme.textSecondary).lineLimit(3) }
+            }
+            .padding(Theme.Space.md).frame(width: 300, alignment: .leading).frame(minHeight: 64, alignment: .topLeading)
+            .background(selected == s.id ? Theme.accent.opacity(0.12) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(selected == s.id ? Theme.accent : Theme.border, style: StrokeStyle(lineWidth: 1, dash: s.optional ? [4, 3] : [])))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
+        }.buttonStyle(.plain).accessibilityLabel(s.title)
+    }
+
+    private func status(_ r: Resolution, _ t: WorkflowTask) -> String {
+        if r.manual { return "Manual step" }
+        if r.primary == nil { return ProviderRegistry.all.contains { $0.supports(t.capability) } ? "Not configured" : "No adapter yet" }
+        return r.inherited ? "Inherited from Default Model" : "Custom model for this task"
     }
 }

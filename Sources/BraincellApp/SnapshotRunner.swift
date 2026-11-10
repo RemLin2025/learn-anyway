@@ -25,6 +25,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_LIBRARY_SNAP"] != nil { await libraryScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_BENCH"] != nil { await Bench.run(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_SETTINGS_SNAP"] != nil { await settingsScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -56,6 +57,65 @@ enum SnapshotRunner {
         await adaptiveScenario(model, shot: shot)
         await releaseScenario(model, dir: dir, shot: shot)
         NSApp.terminate(nil)
+    }
+
+    /// Drives the real Home chat against a local scripted model server (BRAINCELL_CHAT_PORT) and screenshots each stage. Only against BRAINCELL_DATA_DIR.
+    static func chatScenario(_ model: AppModel, dir: URL) async {
+        guard let chat = model.chat, let gw = model.gateway, let courses = model.courses, let docs = model.documents, let port = ProcessInfo.processInfo.environment["BRAINCELL_CHAT_PORT"],
+              ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        var log = ""
+        func note(_ s: String) { log += s + "\n"; try? log.write(to: dir.appendingPathComponent("chat-log.txt"), atomically: true, encoding: .utf8) }
+        func shotWin(_ name: String, wait: UInt64 = 1_200_000_000) async {
+            try? await Task.sleep(nanoseconds: wait)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil && $0.title != "Settings" })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        func until(_ secs: Double, _ cond: @MainActor () -> Bool) async -> Bool { let end = Date().addingTimeInterval(secs); while Date() < end { if cond() { return true }; try? await Task.sleep(nanoseconds: 250_000_000) }; return cond() }
+        func pendingApproval() -> UUID? {
+            chat.messages.last(where: { $0.kind == .approval }).flatMap { m in (try? JSONSerialization.jsonObject(with: Data((m.payload ?? "{}").utf8))) as? [String: String] }
+                .flatMap { $0["status"] == "proposed" ? $0["actionId"].flatMap(UUID.init) : nil }
+        }
+        do {
+            let (c, n) = try await gw.connect(providerId: "custom", name: "Local scripted model", baseURL: "http://127.0.0.1:\(port)/v1", apiKey: "test")
+            try gw.store.setDefault(.llm, connection: c.id, model: "scripted-model"); note("connected, \(n) model(s)")
+        } catch { note("connect failed: \(error.localizedDescription)"); return }
+        model.aiConfig?.reload()
+        let cal = Calendar.current
+        let course = try? courses.createCourse(name: "COMP301 Midterm 2 (Frank)")
+        if let course {
+            let friday = cal.nextDate(after: Date(), matching: DateComponents(weekday: 6), matchingPolicy: .nextTime)
+            _ = try? courses.addAssessment(courseId: course.id, name: "Midterm 2", kind: .midterm, deadline: friday, isCumulative: true)
+            _ = try? courses.addSkill(courseId: course.id, name: "Pointers")
+            let f = dir.appendingPathComponent("notes.txt"); try? "Lecture 4: Pointers\n\nA pointer stores a memory address. The dereference operator * reads the value at that address. malloc from stdlib.h allocates heap memory.".write(to: f, atomically: true, encoding: .utf8)
+            _ = try? docs.importFile(at: f, courseId: course.id)
+        }
+        model.reload(); model.selection = .home; chat.newChat()
+        await shotWin("chat-1-empty")
+        chat.draft = SuggestionGrid.all[0].prompt
+        await shotWin("chat-2-suggestion-in-composer", wait: 400_000_000)
+        chat.draft = "Help me prepare for my COMP301 Midterm 2 next Friday. I want a study plan and practice problems."
+        chat.send()
+        note("sent; waiting for approval: \(await until(40) { pendingApproval() != nil })")
+        await shotWin("chat-3-approval")
+        if let a = pendingApproval() { chat.approve(a) }
+        note("preview: \(await until(60) { chat.messages.contains { $0.kind == .preview } && !chat.thinking })")
+        await shotWin("chat-4-preview")
+        if let gid = chat.messages.last(where: { $0.kind == .preview }).flatMap({ m in ((try? JSONSerialization.jsonObject(with: Data((m.payload ?? "{}").utf8))) as? [String: String])?["actionId"].flatMap(UUID.init) }) { chat.savePreview(gid) }
+        _ = await until(20) { (try? model.questions?.list({ var f = QuestionFilter(); f.courseId = course?.id; return f }()).count) == 3 }
+        note("questions in bank after save: \((try? model.questions?.list({ var f = QuestionFilter(); f.courseId = course?.id; return f }()).count) ?? -1)")
+        chat.draft = "Please rebuild my plan now that the questions are saved."; chat.send()
+        _ = await until(40) { !chat.thinking && chat.messages.last?.role == .assistant && chat.messages.last?.kind == .text }
+        await shotWin("chat-5-plan")
+        note("plans: \((try? chat.store.plans().count) ?? -1), conversations: \(chat.conversations.count)")
+        chat.newChat(); chat.draft = "Help me prepare for my BIO101 exam."; chat.send()
+        note("bio approval: \(await until(40) { pendingApproval() != nil })")
+        await shotWin("chat-6-create-course")
+        if let a = pendingApproval() { chat.approve(a) }
+        _ = await until(40) { !chat.thinking && chat.messages.last?.role == .assistant && chat.messages.last?.kind == .text }
+        note("courses: \(model.courseList.map(\.name))")
+        model.reload()
+        await shotWin("chat-7-created")
+        note("done")
     }
 
     /// Library screenshots from synthetic files. Only with BRAINCELL_LIBRARY_SNAP and BRAINCELL_DATA_DIR (never your real library).
@@ -126,16 +186,20 @@ enum SnapshotRunner {
             try? gw.store.record(AIRequestRecord(id: UUID(), ts: t, connectionId: c.id, providerId: "openrouter", modelId: k % 2 == 0 ? "openai/gpt-4o-mini" : "deepseek/deepseek-chat", capability: .llm, task: k % 2 == 0 ? "quizGeneration" : "answerEvaluation", courseId: nil,
                 status: d == 3 && k == 0 ? "failed" : "success", latencyMs: 900 + d * 40, inputTokens: 1800 + d * 90, outputTokens: 600 + k * 120, cachedTokens: nil, costMicros: k % 2 == 0 ? Int64(2400 + d * 100) : nil, costBasis: k % 2 == 0 ? "estimated" : "unknown", errorCategory: d == 3 && k == 0 ? "rate_limit" : nil))
         } }
+        for i in 0..<450 {            // a large catalog, like OpenRouter's, to check scrolling and filtering
+            try? gw.store.save(AIModelRecord(connectionId: c.id, modelId: "vendor\(i % 12)/model-\(i)-with-a-fairly-long-name", displayName: "Vendor \(i % 12) Model \(i) Long Display Name", capability: .llm, source: "discovered", inputPricePerM: i % 9 == 0 ? nil : Double(i % 30) * 0.1, outputPricePerM: i % 9 == 0 ? nil : Double(i % 30) * 0.4))
+        }
         model.aiConfig?.reload()
         let wfOnly = ProcessInfo.processInfo.environment["BRAINCELL_WF_ONLY"]
         if let wfOnly {                                      // workflow-page shots at several window sizes, optionally pre-expanded
-            UserDefaults.standard.set(SettingsSection.workflow.rawValue, forKey: "settingsSection")
+            UserDefaults.standard.set(SettingsSection.workflow.rawValue, forKey: "settingsSection"); UserDefaults.standard.set("map", forKey: "wf.mode")
             UserDefaults.standard.set(wfOnly.split(separator: ",").map(String.init).filter { !$0.isEmpty }, forKey: "wf.expanded")
             UserDefaults.standard.removeObject(forKey: "wf.cam")
         }
-        model.snapshotOpenSettings = true
+        model.openSettings()
         try? await Task.sleep(nanoseconds: 2_000_000_000)
-        guard let w = NSApp.windows.first(where: { $0.isVisible && ($0.title == "Settings" || $0.identifier?.rawValue.contains("Settings") == true || $0.title.contains("General")) }) else { NSLog("snapshot: no settings window"); return }
+        guard let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { NSLog("snapshot: no window"); return }
+        NSLog("snapshot: windows=%d (Settings is in-app, expect 1 content window)", NSApp.windows.filter { $0.isVisible && $0.contentView != nil && !($0 is NSPanel) && $0.frame.width > 300 }.count)
         if wfOnly != nil {
             for (name, size) in [("wide", NSSize(width: 1500, height: 900)), ("default", NSSize(width: 1180, height: 780)), ("min", NSSize(width: 980, height: 640))] {
                 w.setContentSize(size)

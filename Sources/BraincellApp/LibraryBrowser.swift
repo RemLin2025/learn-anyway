@@ -47,7 +47,7 @@ struct LibraryBrowser: View {
     var body: some View {
         VStack(spacing: 0) {
             header
-            pills
+            if title != nil { pills }
             if tab == .items { crumbBar }
             Divider().opacity(0).frame(height: Theme.Space.sm)
             content
@@ -84,17 +84,17 @@ struct LibraryBrowser: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.md) {
-            if let title { Text(title).font(Theme.pageTitle).lineLimit(1) }
-            Spacer(minLength: Theme.Space.md)
+            if let title { Text(title).font(Theme.pageTitle).lineLimit(1); Spacer(minLength: Theme.Space.md) }
+            else { pillTabs.frame(minWidth: 100) }
             Menu {
                 Picker("Sort by", selection: $query.sort) { ForEach(LibrarySort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
                 Divider()
                 Picker("Order", selection: $query.ascending) { Text("Ascending").tag(true); Text("Descending").tag(false) }
-            } label: { Image(systemName: "line.3.horizontal.decrease") }.menuStyle(.borderlessButton).fixedSize().help("Sort").accessibilityLabel("Sort")
+            } label: { Image(systemName: "line.3.horizontal.decrease").frame(width: 34, height: 30).contentShape(Rectangle()) }.menuStyle(.borderlessButton).fixedSize().help("Sort").accessibilityLabel("Sort")
             HStack(spacing: 2) {
                 layoutButton("grid", "square.grid.2x2", "Grid view"); layoutButton("list", "list.bullet", "List view")
             }.padding(3).background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-            SearchField(prompt: "Search library", text: $searchText).frame(minWidth: 160, idealWidth: 240, maxWidth: 280)
+            SearchField(prompt: "Search library", text: $searchText).frame(minWidth: 100, idealWidth: title == nil ? 170 : 240, maxWidth: title == nil ? 220 : 280)
             Menu {
                 Button { newFolder = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }.disabled(tab == .deleted)
                 Button { pickFiles() } label: { Label("Import Files…", systemImage: "square.and.arrow.down") }
@@ -105,14 +105,15 @@ struct LibraryBrowser: View {
     }
 
     private func layoutButton(_ id: String, _ symbol: String, _ label: String) -> some View {
-        Button { layout = id } label: { Image(systemName: symbol).frame(width: 28, height: 24).background(layout == id ? Theme.surface : .clear, in: RoundedRectangle(cornerRadius: 8)) }
+        Button { layout = id } label: { Image(systemName: symbol).frame(width: 34, height: 28).background(layout == id ? Theme.surface : .clear, in: RoundedRectangle(cornerRadius: 8)).contentShape(RoundedRectangle(cornerRadius: 8)) }
             .buttonStyle(.plain).help(label).accessibilityLabel(label).accessibilityAddTraits(layout == id ? .isSelected : [])
     }
 
-    private var pills: some View {
+    private var pills: some View { pillTabs.padding(.horizontal, Theme.Space.lg) }
+    private var pillTabs: some View {
         PillTabs(selection: Binding(get: { pill }, set: { setPill($0) }), options: [.filter(.all), .filter(.documents), .filter(.images), .filter(.videos), .filter(.folders), .favorites, .deleted]) {
             switch $0 { case .filter(let f): f.rawValue; case .favorites: "Favorites"; case .deleted: "Recently Deleted" }
-        }.padding(.horizontal, Theme.Space.lg)
+        }
     }
 
     private func setPill(_ p: Pill) {
@@ -166,8 +167,9 @@ struct LibraryBrowser: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
                 ForEach(entries) { e in
                     LibraryCard(entry: e, url: lib?.fileURL(e), selected: selection.contains(e.id))
-                        .onTapGesture(count: 2) { open(e) }
+                        .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
                         .onTapGesture { click(e) }
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { open(e) })      // simultaneous: a single click selects at once instead of waiting out the double-click interval
                         .contextMenu { menu(e) }
                 }
             }.padding(Theme.Space.lg)
@@ -180,8 +182,8 @@ struct LibraryBrowser: View {
             LazyVStack(spacing: 2) {
                 ForEach(entries) { e in
                     LibraryRow(entry: e, selected: selection.contains(e.id))
-                        .onTapGesture(count: 2) { open(e) }
                         .onTapGesture { click(e) }
+                        .simultaneousGesture(TapGesture(count: 2).onEnded { open(e) })
                         .contextMenu { menu(e) }
                 }
             }.padding(Theme.Space.lg)

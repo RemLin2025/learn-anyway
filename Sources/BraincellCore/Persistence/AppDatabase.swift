@@ -589,6 +589,59 @@ public final class AppDatabase: Sendable {
             try db.create(index: "documents_on_folder", on: "documents", columns: ["folderId"])
             try db.create(index: "documents_on_sha", on: "documents", columns: ["sha256"])
         }
+        m.registerMigration("v13_agent_chat") { db in
+            try db.create(table: "chat_conversations") { t in
+                t.primaryKey("id", .blob)
+                t.column("title", .text).notNull()
+                t.column("courseId", .blob).references("courses", onDelete: .setNull)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "chat_messages") { t in
+                t.primaryKey("id", .blob)
+                t.column("conversationId", .blob).notNull().references("chat_conversations", onDelete: .cascade)
+                t.column("ordinal", .integer).notNull()
+                t.column("role", .text).notNull()                 // user | assistant | tool | notice
+                t.column("kind", .text).notNull().defaults(to: "text")   // text | tool | approval | plan | preview | actions | error
+                t.column("content", .text).notNull()
+                t.column("payload", .text)                        // JSON for rich kinds
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["conversationId", "ordinal"])
+            }
+            // One row per tool call. The (conversation, key) uniqueness is what makes a repeated model call a no-op.
+            try db.create(table: "agent_actions") { t in
+                t.primaryKey("id", .blob)
+                t.column("conversationId", .blob).notNull().references("chat_conversations", onDelete: .cascade)
+                t.column("key", .text).notNull()
+                t.column("tool", .text).notNull()
+                t.column("args", .text).notNull()
+                t.column("status", .text).notNull()               // proposed | running | succeeded | failed | declined
+                t.column("result", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.uniqueKey(["conversationId", "key"])
+            }
+            try db.create(table: "study_plans") { t in
+                t.primaryKey("id", .blob)
+                t.column("conversationId", .blob).references("chat_conversations", onDelete: .setNull)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .setNull)
+                t.column("title", .text).notNull()
+                t.column("dueDate", .datetime)
+                t.column("planJSON", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "chat_messages_on_conv", on: "chat_messages", columns: ["conversationId", "ordinal"])
+            try db.create(index: "study_plans_on_course", on: "study_plans", columns: ["courseId", "updatedAt"])
+        }
+        m.registerMigration("v14_model_price_overrides") { db in
+            try db.alter(table: "ai_models") { t in
+                t.add(column: "customInputPricePerM", .double)
+                t.add(column: "customOutputPricePerM", .double)
+                t.add(column: "pricedAt", .datetime)
+            }
+        }
         return m
     }
 

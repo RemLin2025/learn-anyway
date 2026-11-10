@@ -30,7 +30,7 @@ struct SettingsView: View {
                 }
                 Spacer()
             }
-            .padding(Theme.Space.md).frame(width: 230).background(Theme.surface)
+            .padding(Theme.Space.md).frame(width: 184).background(Theme.surface)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
             Group {
                 switch section {
@@ -49,7 +49,6 @@ struct SettingsView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity).background(Theme.background)
         }
         .buttonStyle(.secondary).textFieldStyle(AppFieldStyle()).tint(Theme.accent)
-        .frame(minWidth: 980, idealWidth: 1080, minHeight: 640, idealHeight: 720)
     }
 }
 
@@ -80,6 +79,7 @@ private struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
             SettingsCard("Direct Anthropic requests (legacy, optional)") {
+                Notice(text: "Superseded: connect Anthropic under Model Services and the gateway handles routing, usage and budgets. This older switch is kept so existing setups keep working.", symbol: "arrow.triangle.branch")
                 Toggle("Allow sending requests straight to the Anthropic API", isOn: Binding(get: { model.directAPIEnabled }, set: { model.setDirectAPI($0) }))
                 if model.directAPIEnabled {
                     HStack {
@@ -92,6 +92,7 @@ private struct GeneralSettings: View {
                 Text("Off by default. When on, you can send a prepared request to Anthropic instead of copying it to ChatGPT. The full request text, including any document excerpts and answers it lists, leaves your device and is billed to your API account. Learn Anyway asks before every send and checks the reply exactly like a pasted one. The key is kept only in the macOS Keychain, never in backups.")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
+            UpdatesCard()
             SettingsCard("Backup & restore") {
                 HStack { Button("Create Backup…") { model.createBackup() }; Button("Restore from Backup…") { model.restoreBackup() } }
                 Text("A backup is a folder with your database and imported files. Learn Anyway stores no passwords or keys, so none are included. Restoring replaces current data after saving a safety copy.")
@@ -118,6 +119,35 @@ private struct SettingsCard<Content: View>: View {
                 Text(title).font(Theme.cardTitle).accessibilityAddTraits(.isHeader)
                 content
             }
+        }
+    }
+}
+
+private struct UpdatesCard: View {
+    @EnvironmentObject var model: AppModel
+    @AppStorage("updateCheckOnLaunch") private var onLaunch = true
+    var body: some View { Inner(u: model.updater, onLaunch: $onLaunch) }
+    struct Inner: View {
+        @ObservedObject var u: UpdateModel
+        @Binding var onLaunch: Bool
+        var body: some View {
+            SettingsCard("Updates") {
+                if u.isAvailable {
+                    Toggle("Check for updates when Learn Anyway opens", isOn: $onLaunch)
+                    HStack {
+                        Button(u.state == .checking ? "Checking…" : "Check for updates") { u.check() }.disabled(u.state == .checking)
+                        if case .available = u.state { Button("Update now") { u.update() }.buttonStyle(.primary) }
+                        Text(status).font(.callout).foregroundStyle(Theme.textSecondary)
+                    }
+                    Text("Compares this app with the source folder it was installed from (\(u.root ?? "")), and with its upstream branch if it has one. Updating rebuilds and reinstalls from that folder, then restarts. Your data is untouched.")
+                        .font(.caption).foregroundStyle(Theme.textSecondary)
+                } else {
+                    Text("In-app updates aren’t set up for this copy. Run scripts/install-macos.sh once from the project folder; after that the app can update itself.").font(.callout).foregroundStyle(Theme.textSecondary)
+                }
+            }
+        }
+        private var status: String {
+            switch u.state { case .upToDate: "You’re up to date."; case .available(let w): "Update available: \(w)."; case .failed(let m): "Check failed: \(m)"; case .updating: "Updating…"; default: "" }
         }
     }
 }

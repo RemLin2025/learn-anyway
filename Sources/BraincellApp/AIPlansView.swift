@@ -27,7 +27,7 @@ struct AIPlansView: View {
                             Text(!p.isImplemented ? "Not supported yet" : (c?.status.label ?? "Not connected")).font(Theme.meta).foregroundStyle(c?.status.color ?? Theme.textSecondary)
                         }
                     }.padding(.vertical, 3).tag(p.id).accessibilityElement(children: .combine)
-                }.sidePanel().frame(width: 270)
+                }.sidePanel().frame(width: 220)
                 ScrollView { detail.padding(Theme.Space.xl).frame(maxWidth: 680, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
             }
         }
@@ -101,7 +101,7 @@ struct AIPlansView: View {
                 Button(c.enabled ? "Disable" : "Enable") { cfg.setEnabled(c, !c.enabled) }
                 Button("Remove credentials…", role: .destructive) { confirmRemove = c }
                 Spacer()
-                Button("Open Model Services") { openServices(.llm) }
+                Button("Open Model Services") { openServices(.llm) }.fixedSize()
             }
             feedback
         }
@@ -112,27 +112,78 @@ struct AIPlansView: View {
         else if let m = cfg.message { Text(m).font(.callout).foregroundStyle(Theme.mastery) }
     }
 
+    @State private var openCaps: Set<Capability> = [.llm]
+    @EnvironmentObject private var app: AppModel
+
     private var planPreview: some View {
-        DisclosureGroup("View model plan", isExpanded: $showPlan) {
-            VStack(alignment: .leading, spacing: Theme.Space.md) {
-                Text("Capabilities offered").font(Theme.cardTitle)
-                ForEach(Capability.allCases) { cap in
-                    HStack(spacing: Theme.Space.sm) {
-                        Image(systemName: cap.symbol).frame(width: 20).foregroundStyle(Theme.textSecondary)
-                        Text(cap.label)
-                        Spacer()
-                        let (t, col): (String, Color) = spec.supports(cap) ? ((conn?.status == .ready) ? ("Available", Theme.mastery) : ("Supported", Theme.accent))
-                            : spec.declared.contains(cap) ? ("Offered by provider · not supported here yet", Theme.attention) : ("Not offered", Theme.textSecondary)
-                        Text(t).font(Theme.meta).foregroundStyle(col)
-                    }.font(.callout).accessibilityElement(children: .combine)
+        VStack(alignment: .leading, spacing: Theme.Space.lg) {
+            if let c = conn { inUse(c) }
+            VStack(alignment: .leading, spacing: Theme.Space.xs) {
+                Text("Capabilities").font(Theme.cardTitle)
+                Text("Offered by the provider, compatible models found, and whether Learn Anyway can call them are different things, so each is shown separately.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                ForEach(Capability.allCases) { cap in capRow(cap) }
+            }
+        }
+    }
+
+    private func capRow(_ cap: Capability) -> some View {
+        let offered = spec.offers(cap), adapter = spec.supports(cap)
+        let ms = conn.map { cfg.models($0, cap) } ?? []
+        let open = openCaps.contains(cap)
+        return VStack(alignment: .leading, spacing: 0) {
+            Button { if open { openCaps.remove(cap) } else { openCaps.insert(cap) } } label: {
+                HStack(spacing: Theme.Space.sm) {
+                    Image(systemName: open ? "chevron.down" : "chevron.right").font(.caption2).frame(width: 12).foregroundStyle(Theme.textSecondary)
+                    Image(systemName: cap.symbol).frame(width: 20).foregroundStyle(Theme.textSecondary)
+                    Text(cap.label).font(.system(.callout, design: .rounded, weight: .medium))
+                    Spacer()
+                    Text(!offered ? "Not offered" : adapter ? (ms.isEmpty ? "Supported · no models yet" : "Supported · \(ms.count) model\(ms.count == 1 ? "" : "s")") : "Offered · no adapter yet")
+                        .font(Theme.meta).foregroundStyle(adapter && !ms.isEmpty ? Theme.mastery : (offered ? Theme.attention : Theme.textSecondary))
+                }.padding(.vertical, 8).padding(.horizontal, 4).contentShape(Rectangle())
+            }.buttonStyle(.plain).accessibilityLabel("\(cap.label), \(open ? "expanded" : "collapsed")")
+            if open {
+                VStack(alignment: .leading, spacing: 6) {
+                    step("Provider offers this capability", offered)
+                    step("Compatible models found", !ms.isEmpty)
+                    step("Learn Anyway has an adapter", adapter)
+                    step("Configured and available", adapter && conn?.status == .ready && !ms.isEmpty)
+                    step("Assigned to a task", ms.contains { !cfg.assignments(of: $0).isEmpty })
+                    if !offered { Text("\(spec.name) doesn’t advertise \(cap.label). There are no verified compatible models.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                    else if !adapter { Text("\(spec.name) can offer this, but its model list isn’t read and nothing is sent for \(cap.label) in this build, so no model is claimed usable.").font(Theme.meta).foregroundStyle(Theme.attention) }
+                    else if conn == nil { Text("Connect to load this provider’s real model catalog; no list is bundled that could go stale.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                    ForEach(ms.prefix(15)) { m in
+                        let n = cfg.assignments(of: m).count
+                        HStack { Text(m.displayName).lineLimit(1); Spacer(); Text(n == 0 ? "not assigned" : "\(n) task\(n == 1 ? "" : "s")").font(Theme.meta).foregroundStyle(n == 0 ? Theme.textSecondary : Theme.accent) }.font(.callout)
+                    }
+                    if ms.count > 15 { Button("Show all \(ms.count) in Model Services") { openServices(cap) }.buttonStyle(.plain).foregroundStyle(Theme.accent).font(.callout) }
+                }.padding(.leading, 40).padding(.bottom, 8)
+            }
+            Divider().opacity(0.5)
+        }
+    }
+
+    private func step(_ t: String, _ ok: Bool) -> some View {
+        HStack(spacing: 6) { Image(systemName: ok ? "checkmark.circle.fill" : "circle").foregroundStyle(ok ? Theme.mastery : Theme.textSecondary.opacity(0.6)); Text(t).foregroundStyle(ok ? Theme.textPrimary : Theme.textSecondary) }.font(Theme.meta)
+    }
+
+    /// Models from this provider that tasks actually resolve to, with the tasks they serve (from the router, so inheritance is explicit).
+    private func inUse(_ c: AIConnection) -> some View {
+        let used = cfg.models(c).filter { !cfg.assignments(of: $0).isEmpty }
+        return VStack(alignment: .leading, spacing: Theme.Space.sm) {
+            Text("In use").font(Theme.cardTitle)
+            if used.isEmpty { Text("No task currently resolves to a \(c.name) model.").font(.callout).foregroundStyle(Theme.textSecondary) }
+            ForEach(used) { m in
+                Card {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(m.displayName).font(.system(.callout, design: .rounded, weight: .semibold))
+                        ForEach(cfg.assignments(of: m).sorted { $0.task.title < $1.task.title }, id: \.task.id) { a in
+                            Button { app.openWorkflow(task: a.task.id) } label: {
+                                HStack { Text(a.task.title); Spacer(); Text(a.inherited ? "inherits default" : "custom").font(Theme.meta).foregroundStyle(Theme.textSecondary); Image(systemName: "chevron.right").font(.caption2).foregroundStyle(Theme.textSecondary) }.font(.callout).contentShape(Rectangle())
+                            }.buttonStyle(.plain).help("Open in AI Workflow")
+                        }
+                    }
                 }
-                if let c = conn {
-                    let ms = cfg.models(c, .llm)
-                    Text("LLM models (\(ms.count))").font(Theme.cardTitle).padding(.top, Theme.Space.sm)
-                    ForEach(ms.prefix(12)) { Text($0.modelId).font(.system(.callout, design: .monospaced)) }
-                    if ms.count > 12 { Text("…and \(ms.count - 12) more in Model Services").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
-                } else if spec.isImplemented { Text("Connect to load this provider’s real model catalog. Learn Anyway doesn’t ship a model list that could go stale.").font(Theme.meta).foregroundStyle(Theme.textSecondary) }
-            }.padding(.top, Theme.Space.sm)
-        }.font(.system(.body, design: .rounded, weight: .semibold))
+            }
+        }
     }
 }
