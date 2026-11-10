@@ -91,8 +91,8 @@ struct ModelServicesView: View {
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            HStack(spacing: Theme.Space.xs) {
+        VStack(alignment: .leading) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Space.xs, alignment: .leading)], alignment: .leading, spacing: Theme.Space.xs) {
                 ForEach(Capability.allCases) { c in
                     Button { tab = c; providerId = ProviderRegistry.providers(for: c).first?.id ?? "" } label: {
                         Label(c.label, systemImage: c.symbol).font(.system(.callout, design: .rounded, weight: tab == c ? .semibold : .regular))

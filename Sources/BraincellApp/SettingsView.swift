@@ -22,7 +22,7 @@ struct SettingsView: View {
                 ForEach(SettingsSection.allCases) { s in
                     Button { raw = s.rawValue } label: {
                         Label(s.rawValue, systemImage: s.symbol).font(.system(.body, design: .rounded, weight: section == s ? .semibold : .regular))
-                            .foregroundStyle(section == s ? Theme.accent : Theme.textPrimary)
+                            .foregroundStyle(section == s ? Theme.accent : Theme.textPrimary).lineLimit(1)
                             .padding(.horizontal, Theme.Space.md).padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading)
                             .background(section == s ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
                             .contentShape(Rectangle())
@@ -30,7 +30,7 @@ struct SettingsView: View {
                 }
                 Spacer()
             }
-            .padding(Theme.Space.md).frame(width: 184).background(Theme.surface)
+            .padding(Theme.Space.md).frame(width: 212).background(Theme.surface)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
             Group {
                 switch section {
@@ -58,12 +58,11 @@ private struct GeneralSettings: View {
 
     var body: some View {
         ScrollView { VStack(alignment: .leading, spacing: Theme.Space.lg) {
-            PageHeader(title: "Settings")
-            SettingsCard("General") {
-            Picker("Appearance", selection: Binding(get: { model.appearance }, set: { model.setAppearance($0) })) {
-                ForEach(AppearanceSetting.allCases, id: \.self) { Text($0.label).tag($0) }
+            PageHeader(title: "General", subtitle: "Appearance, practice, code, updates and your data.")
+            SettingsCard("Appearance & practice") {
+            LabeledContent("Appearance") {
+                SegmentedControl(selection: Binding(get: { model.appearance }, set: { model.setAppearance($0) }), options: Array(AppearanceSetting.allCases), label: { $0.label })
             }
-            .pickerStyle(.segmented)
             Stepper("Code font size: \(model.codeFontSize) pt", value: Binding(get: { model.codeFontSize }, set: { model.setCodeFontSize($0) }), in: 10...24)
             Toggle("Show coach suggestions while practising", isOn: Binding(get: { model.coachEnabled }, set: { model.setCoachEnabled($0) }))
             Picker("Confidence check", selection: Binding(get: { model.confidencePrompts }, set: { model.setConfidencePrompts($0) })) {
@@ -77,6 +76,18 @@ private struct GeneralSettings: View {
                     .font(.caption).foregroundStyle(Theme.textSecondary)
                 Text("Code runs in a separate, locked-down process: no network, no access to your files, one temporary folder, strict time, memory and output limits. Off by default; nothing runs unless you switch this on.")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            UpdatesCard()
+            SettingsCard("Backup & restore") {
+                HStack { Button("Create Backup…") { model.createBackup() }; Button("Restore from Backup…") { model.restoreBackup() } }
+                Text("A backup is a folder with your database and imported files. Learn Anyway stores no passwords or keys, so none are included. Restoring replaces current data after saving a safety copy.")
+                    .font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            SettingsCard("About your data") {
+            LabeledContent("Data location") {
+                Text(ManagedStorage.defaultRoot().path).textSelection(.enabled).font(.caption).foregroundStyle(Theme.textSecondary)
+            }
+            LabeledContent("ChatGPT") { Text("Manual workflow only: Learn Anyway never signs in to or automates ChatGPT.").font(.caption).foregroundStyle(Theme.textSecondary) }
             }
             SettingsCard("Direct Anthropic requests (legacy, optional)") {
                 Notice(text: "Superseded: connect Anthropic under Model Services and the gateway handles routing, usage and budgets. This older switch is kept so existing setups keep working.", symbol: "arrow.triangle.branch")
@@ -92,19 +103,7 @@ private struct GeneralSettings: View {
                 Text("Off by default. When on, you can send a prepared request to Anthropic instead of copying it to ChatGPT. The full request text, including any document excerpts and answers it lists, leaves your device and is billed to your API account. Learn Anyway asks before every send and checks the reply exactly like a pasted one. The key is kept only in the macOS Keychain, never in backups.")
                     .font(.caption).foregroundStyle(Theme.textSecondary)
             }
-            UpdatesCard()
-            SettingsCard("Backup & restore") {
-                HStack { Button("Create Backup…") { model.createBackup() }; Button("Restore from Backup…") { model.restoreBackup() } }
-                Text("A backup is a folder with your database and imported files. Learn Anyway stores no passwords or keys, so none are included. Restoring replaces current data after saving a safety copy.")
-                    .font(.caption).foregroundStyle(Theme.textSecondary)
-            }
-            SettingsCard("About your data") {
-            LabeledContent("Data location") {
-                Text(ManagedStorage.defaultRoot().path).textSelection(.enabled).font(.caption).foregroundStyle(Theme.textSecondary)
-            }
-            LabeledContent("ChatGPT") { Text("Manual workflow only: Learn Anyway never signs in to or automates ChatGPT.").font(.caption).foregroundStyle(Theme.textSecondary) }
-            }
-        }.padding(Theme.Space.xl).frame(maxWidth: 640, alignment: .leading).frame(maxWidth: .infinity) }
+        }.padding(Theme.Space.xl).frame(maxWidth: 760, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
         .background(Theme.background)
     }
 }

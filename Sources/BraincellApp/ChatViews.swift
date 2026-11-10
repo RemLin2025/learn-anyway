@@ -97,6 +97,7 @@ struct SuggestionGrid: View {
         S(id: "explain", symbol: "book", title: "Explain a concept", prompt: "Teach me a difficult topic step by step."),
         S(id: "weak", symbol: "chart.line.uptrend.xyaxis", title: "Review my weaknesses", prompt: "Analyze my performance and help me improve."),
         S(id: "cram", symbol: "bolt", title: "Quick cram", prompt: "I have one hour to study. Help me prioritize."),
+        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", prompt: "Summarize my notes into the key points I should remember."),
     ]
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: Theme.Space.sm)], spacing: Theme.Space.sm) {
@@ -203,7 +204,7 @@ struct Composer: View {
                     modelMenu(res)
                     Button { chat.thinking ? chat.stop() : chat.send() } label: {
                         Image(systemName: chat.thinking ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 30, height: 30).background((chat.draft.trimmed.isEmpty && chat.attached.isEmpty && !chat.thinking) ? Theme.accent.opacity(0.4) : Theme.accent, in: Circle())
+                            .frame(width: 30, height: 30).background((chat.draft.trimmed.isEmpty && chat.attached.isEmpty && !chat.thinking) ? Theme.accent.opacity(0.55) : Theme.accent, in: Circle())
                     }.buttonStyle(.plain).disabled(!chat.thinking && chat.draft.trimmed.isEmpty && chat.attached.isEmpty)
                         .accessibilityLabel(chat.thinking ? "Stop" : "Send").keyboardShortcut(.return, modifiers: .command)
                 }.foregroundStyle(Theme.textSecondary)

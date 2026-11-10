@@ -87,8 +87,9 @@ struct InsightsView: View {
                 let total = days.reduce(0) { $0 + $1.minutes }
                 Text("\(Int(total.rounded())) min on answered questions · \(days.reduce(0) { $0 + $1.attempts }) answers" + (focusMinutes > 0 ? " · \(focusMinutes) min of focus timer" : ""))
                     .font(.caption).foregroundStyle(Theme.textSecondary)
-                Chart(days, id: \.day) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Minutes", $0.minutes)).foregroundStyle(Theme.accent) }
-                    .frame(height: 140).chartYAxisLabel("min")
+                Group { if total == 0 { Label("No timed answers yet. Practise and your study time appears here.", systemImage: "clock").foregroundStyle(Theme.textSecondary).frame(maxWidth: .infinity, minHeight: 140, alignment: .center) }
+                else { Chart(days, id: \.day) { BarMark(x: .value("Day", $0.day, unit: .day), y: .value("Minutes", $0.minutes)).foregroundStyle(Theme.accent) }
+                    .frame(height: 140).chartYAxisLabel("min") } }
                     .accessibilityLabel("Study minutes per day for the last 30 days, \(Int(total.rounded())) minutes in total")
             }
         }
@@ -121,7 +122,7 @@ struct InsightsView: View {
                 else if pts.count < 2 { Text("Not enough evidence yet: a trend needs at least two graded answers (\(pts.count) so far).").foregroundStyle(Theme.textSecondary) }
                 else {
                     Chart(pts, id: \.at) { LineMark(x: .value("Date", $0.at), y: .value("Estimate", ($0.overall ?? 0) * 100)).foregroundStyle(Theme.mastery); PointMark(x: .value("Date", $0.at), y: .value("Estimate", ($0.overall ?? 0) * 100)).foregroundStyle(Theme.mastery) }
-                        .chartYScale(domain: 0...100).frame(height: 160).chartYAxisLabel("est. %")
+                        .chartYScale(domain: 0...100).chartXAxis { AxisMarks(values: .automatic(desiredCount: 4)) { _ in AxisGridLine(); AxisTick(); AxisValueLabel(format: .dateTime.month(.abbreviated).day()) } }.frame(height: 160).chartYAxisLabel("est. %")
                         .accessibilityLabel("Estimated mastery over time, \(pts.count) points")
                     Text("Each point is one graded answer. Early points rest on little evidence.").font(.caption).foregroundStyle(Theme.textSecondary)
                 }

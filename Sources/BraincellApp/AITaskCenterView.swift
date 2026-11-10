@@ -80,7 +80,7 @@ struct TaskDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 Text(task.title).font(Theme.sectionTitle)
-                Text("Manual workflow: copy or export a request, run it in ChatGPT yourself, then import the JSON reply.").foregroundStyle(Theme.textSecondary)
+                Text("Copy the request, run it in your own ChatGPT chat, then import the JSON reply.").foregroundStyle(Theme.textSecondary)
                 ForEach(batches) { b in
                     Card {
                         VStack(alignment: .leading, spacing: 8) {

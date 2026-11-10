@@ -153,7 +153,7 @@ struct AssessmentsTab: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack { Text(a.name).font(Theme.cardTitle)
                                     if a.isCumulative { Badge(text: "Cumulative", color: Theme.mastery) } }
-                                if let d = a.deadline { Text("Due \(d.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(Theme.textSecondary) }
+                                Text(a.deadline.map { "Due \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "No due date").font(.caption).foregroundStyle(Theme.textSecondary)
                             }.tag(a.id)
                             .contextMenu {
                                 Button("Edit…") { editing = a }

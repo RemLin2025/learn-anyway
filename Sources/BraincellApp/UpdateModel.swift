@@ -107,7 +107,12 @@ final class UpdateModel: ObservableObject {
             }.value
             poll?.cancel()
             if cancelled { state = .idle; return }
-            if r.0 != 0 { state = .failed(r.1.trimmingCharacters(in: .whitespacesAndNewlines).suffix(600).description) }
+            if r.0 != 0 { state = .failed(r.1.trimmingCharacters(in: .whitespacesAndNewlines).suffix(600).description); return }
+            // Installed but this old copy is still running (the script's own quit/relaunch missed it): relaunch ourselves instead of sitting at "3s left".
+            let app = Bundle.main.bundlePath
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh"); p.arguments = ["-c", "sleep 1; open \"$0\"", app]
+            try? p.run()
+            NSApp.terminate(nil)
         }
     }
 
