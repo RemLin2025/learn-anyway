@@ -20,6 +20,7 @@ if [ -f $CLT/usr/include/swift/module.modulemap ] && [ -f $CLT/usr/include/swift
   VFS=(-vfsoverlay "$OVERLAY")
 else VFS=(); fi
 
+JOBS=$(sysctl -n hw.ncpu 2>/dev/null || echo 4)
 SWIFTC=(swiftc "${VFS[@]}" -target arm64-apple-macos15.0 "${OPT[@]}")
 
 build_grdb() {
@@ -32,10 +33,14 @@ build_grdb() {
     $(find "$DEPS/GRDB.swift/GRDB" -name '*.swift')
 }
 
+# True when $1 exists and is newer than every Swift file under the given dirs (so the step can be skipped).
+up_to_date() { local out=$1; shift; [ -f "$out" ] && [ -z "$(find "$@" -name '*.swift' -newer "$out" -print -quit)" ]; }
+
 build_core() {
   build_grdb
+  if up_to_date "$OUT/libBraincellCore.a" Sources/BraincellCore && [ -f "$OUT/BraincellCore.swiftmodule" ]; then echo "» BraincellCore (up to date)"; return; fi
   echo "» BraincellCore"
-  "${SWIFTC[@]}" -swift-version 5 -enable-testing -parse-as-library -wmo -module-name BraincellCore -emit-module -emit-library -static \
+  "${SWIFTC[@]}" -num-threads "$JOBS" -swift-version 5 -enable-testing -parse-as-library -wmo -module-name BraincellCore -emit-module -emit-library -static \
     -I "$OUT" -I "$DEPS/GRDB.swift/Sources/GRDBSQLite" -emit-module-path "$OUT/BraincellCore.swiftmodule" -o "$OUT/libBraincellCore.a" \
     $(find Sources/BraincellCore -name '*.swift')
 }
@@ -64,7 +69,7 @@ build_app() {
   echo "» Braincell.app"
   local APP=$OUT/Braincell.app/Contents
   mkdir -p "$APP/MacOS"
-  "${SWIFTC[@]}" -swift-version 5 -parse-as-library -module-name BraincellApp -I "$OUT" -I "$DEPS/GRDB.swift/Sources/GRDBSQLite" \
+  "${SWIFTC[@]}" -j "$JOBS" -swift-version 5 -parse-as-library -module-name BraincellApp -I "$OUT" -I "$DEPS/GRDB.swift/Sources/GRDBSQLite" \
     "$OUT/libBraincellCore.a" "$OUT/libGRDB.a" -lsqlite3 \
     $(find Sources/BraincellApp -name '*.swift') -o "$APP/MacOS/Braincell"
   cp Sources/BraincellApp/Info.plist "$APP/Info.plist" 2>/dev/null || true

@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 import UniformTypeIdentifiers
 import BraincellCore
 
@@ -32,6 +33,7 @@ struct LibraryBrowser: View {
     @State private var pasteTitle = ""
     @State private var pasteText = ""
     @State private var deleting: [LibraryRef]?
+    @State private var dropTarget: UUID?
     @State private var targeted = false
 
     enum Tab: Hashable { case items, deleted }
@@ -54,7 +56,7 @@ struct LibraryBrowser: View {
         }
         .task(id: reloadKey) { await reload() }
         .task(id: searchText) { try? await Task.sleep(nanoseconds: 250_000_000); if !Task.isCancelled { query.text = searchText } }
-        .dropDestination(for: URL.self, action: { urls, _ in startImport(urls); return true }, isTargeted: { targeted = $0 })
+        .onDrop(of: [.fileURL], isTargeted: $targeted) { handleDrop($0) }
         .overlay { if targeted { RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).background(Theme.accent.opacity(0.06)).padding(6).allowsHitTesting(false) } }
         .sheet(item: $previewing) { e in PreviewSheet(entry: e, url: lib?.fileURL(e)) }
         .sheet(isPresented: Binding(get: { moving != nil }, set: { if !$0 { moving = nil } })) { MoveSheet(refs: moving ?? [], base: base) { target in move(moving ?? [], to: target) } }
@@ -148,7 +150,7 @@ struct LibraryBrowser: View {
     @ViewBuilder private var content: some View {
         if tab == .deleted { RecentlyDeletedView() }
         else if !loaded { ProgressView().frame(maxWidth: .infinity, maxHeight: .infinity) }
-        else if entries.isEmpty { empty }
+        else if entries.isEmpty { empty.contentShape(Rectangle()).contextMenu { addMenu } }
         else if layout == "grid" { grid } else { list }
     }
 
@@ -167,6 +169,8 @@ struct LibraryBrowser: View {
             LazyVGrid(columns: [GridItem(.adaptive(minimum: 190, maximum: 260), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
                 ForEach(entries) { e in
                     LibraryCard(entry: e, url: lib?.fileURL(e), selected: selection.contains(e.id))
+                        .overlay { dropHighlight(e) }
+                        .onDrop(of: [.fileURL], isTargeted: dropTargetBinding(e)) { p in dropLocation(e).map { handleDrop(p, into: $0) } ?? handleDrop(p) }
                         .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
                         .onTapGesture { click(e) }
                         .simultaneousGesture(TapGesture(count: 2).onEnded { open(e) })      // simultaneous: a single click selects at once instead of waiting out the double-click interval
@@ -174,7 +178,7 @@ struct LibraryBrowser: View {
                 }
             }.padding(Theme.Space.lg)
         }
-        .background(Color.clear.contentShape(Rectangle()).onTapGesture { selection = [] })
+        .background(Color.clear.contentShape(Rectangle()).onTapGesture { selection = [] }.contextMenu { addMenu })
     }
 
     private var list: some View {
@@ -182,12 +186,31 @@ struct LibraryBrowser: View {
             LazyVStack(spacing: 2) {
                 ForEach(entries) { e in
                     LibraryRow(entry: e, selected: selection.contains(e.id))
+                        .overlay { dropHighlight(e) }
+                        .onDrop(of: [.fileURL], isTargeted: dropTargetBinding(e)) { p in dropLocation(e).map { handleDrop(p, into: $0) } ?? handleDrop(p) }
                         .onTapGesture { click(e) }
                         .simultaneousGesture(TapGesture(count: 2).onEnded { open(e) })
                         .contextMenu { menu(e) }
                 }
             }.padding(Theme.Space.lg)
         }
+        .background(Color.clear.contentShape(Rectangle()).onTapGesture { selection = [] }.contextMenu { addMenu })
+    }
+
+    /// Right-click on empty space.
+    @ViewBuilder private var addMenu: some View {
+        Button { newFolder = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }
+        Button { pickFiles() } label: { Label("Add Files…", systemImage: "doc.badge.plus") }
+        Button { pickFolder() } label: { Label("Add Folder…", systemImage: "folder") }
+        Divider()
+        Button { pasting = true } label: { Label("Paste Notes…", systemImage: "doc.on.clipboard") }
+    }
+
+    @ViewBuilder private func dropHighlight(_ e: LibraryEntry) -> some View {
+        if dropTarget == e.id { RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.accent, lineWidth: 2).background(Theme.accent.opacity(0.08)).allowsHitTesting(false) }
+    }
+    private func dropTargetBinding(_ e: LibraryEntry) -> Binding<Bool> {
+        Binding(get: { dropTarget == e.id }, set: { on in if on { dropTarget = e.id } else if dropTarget == e.id { dropTarget = nil } })
     }
 
     @ViewBuilder private func menu(_ e: LibraryEntry) -> some View {
@@ -268,9 +291,27 @@ struct LibraryBrowser: View {
         if p.runModal() == .OK { startImport(p.urls) }
     }
 
-    private func startImport(_ urls: [URL]) {
+    /// Accepts files and folders dragged from Finder. Dropping on a folder tile imports into that folder; anywhere else imports into the open location.
+    private func handleDrop(_ providers: [NSItemProvider], into dest: LibraryLocation? = nil) -> Bool {
+        let ps = providers.filter { $0.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) }
+        guard !ps.isEmpty else { return false }
+        Task { @MainActor in
+            var urls: [URL] = []
+            for p in ps { if let u = await Self.loadFileURL(p) { urls.append(u) } }
+            if !urls.isEmpty { startImport(urls, into: dest) }
+        }
+        return true
+    }
+    private static func loadFileURL(_ p: NSItemProvider) async -> URL? {
+        await withCheckedContinuation { c in
+            _ = p.loadObject(ofClass: URL.self) { url, _ in c.resume(returning: url) }
+        }
+    }
+    private func dropLocation(_ e: LibraryEntry) -> LibraryLocation? { e.kind == .courseFolder ? .course(e.id) : e.kind == .folder ? .folder(e.id) : nil }
+
+    private func startImport(_ urls: [URL], into dest: LibraryLocation? = nil) {
         guard let lib, importTask == nil else { return }
-        let loc = location; notice = nil
+        let loc = dest ?? location; notice = nil
         importProgress = (0, urls.count)
         importTask = Task.detached {
             let r = lib.importFiles(urls, into: loc) { done, total in Task { @MainActor in importProgress = (done, total) } }
@@ -320,7 +361,7 @@ private struct PreviewSheet: View {
                 if let url { Button("Open") { NSWorkspace.shared.open(url) }; Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) } }
                 Button("Done") { dismiss() }.buttonStyle(.primary).keyboardShortcut(.cancelAction) }.padding(Theme.Space.md)
             Divider()
-            if let url { QuickLookPreview(url: url) } else { EmptyStateView(symbol: "questionmark.folder", title: "File not found", message: "The stored copy is missing.") }
+            if let url { if entry.kind == .pdf { PDFPreview(url: url) } else { QuickLookPreview(url: url) } } else { EmptyStateView(symbol: "questionmark.folder", title: "File not found", message: "The stored copy is missing.") }
         }.frame(minWidth: 640, minHeight: 520).background(Theme.background)
     }
 }
@@ -358,4 +399,13 @@ private struct MoveSheet: View {
                 Button("Move") { if let pick { choose(pick); dismiss() } }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(pick == nil) }
         }.dialogSurface(width: 440).task { dests = (try? model.library?.destinations()) ?? [] }
     }
+}
+
+/// PDFKit opens a PDF far faster than Quick Look's sandboxed preview, so the sheet is usable immediately.
+private struct PDFPreview: NSViewRepresentable {
+    let url: URL
+    func makeNSView(context: Context) -> PDFView {
+        let v = PDFView(); v.autoScales = true; v.displayMode = .singlePageContinuous; v.document = PDFDocument(url: url); return v
+    }
+    func updateNSView(_ v: PDFView, context: Context) {}
 }

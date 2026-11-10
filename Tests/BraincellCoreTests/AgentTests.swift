@@ -5,10 +5,12 @@ import GRDB
 
 /// A scripted stand-in for the model. Everything AFTER the model (tool validation, approvals, services, database, planner, import) is the real code.
 final class IdBox: @unchecked Sendable { var v = UUID() }
+final class LockedBox<T>: @unchecked Sendable { private let l = NSLock(); private var v: T; init(_ v: T) { self.v = v }; func withLock<R>(_ f: (inout T) -> R) -> R { l.withLock { f(&v) } }; var value: T { l.withLock { v } } }
 
 final class Script: @unchecked Sendable {
     private let l = NSLock()
     private(set) var prompts: [(system: String, user: String)] = []
+    let roles = LockedBox<[[String]]>([])
     var handler: @Sendable (_ system: String, _ user: String, _ n: Int) -> String
     init(_ h: @escaping @Sendable (String, String, Int) -> String) { handler = h }
     var count: Int { l.withLock { prompts.count } }
@@ -17,7 +19,10 @@ final class Script: @unchecked Sendable {
         if req.httpMethod == "GET" { return (try JSONSerialization.data(withJSONObject: ["data": [["id": "m1"]]]), 200) }
         let body = (try JSONSerialization.jsonObject(with: req.httpBody ?? Data()) as? [String: Any]) ?? [:]
         let msgs = (body["messages"] as? [[String: String]]) ?? []
-        let sys = msgs.first { $0["role"] == "system" }?["content"] ?? "", user = msgs.last { $0["role"] == "user" }?["content"] ?? ""
+        // `user` is the whole ordered conversation flattened (learner turns prefixed "User: "; tool results already carry "Tool result:"), so tests read it as before.
+        let sys = msgs.first { $0["role"] == "system" }?["content"] ?? ""
+        let user = msgs.filter { $0["role"] != "system" }.map { m -> String in let c = m["content"] ?? ""; return m["role"] == "user" && !c.hasPrefix("Tool result:") ? "User: " + c : (m["role"] == "assistant" ? "Assistant: " + c : c) }.joined(separator: "\n")
+        roles.withLock { $0.append(msgs.map { $0["role"] ?? "" }) }
         let n = l.withLock { prompts.append((sys, user)); return prompts.count }
         return (try JSONSerialization.data(withJSONObject: ["choices": [["message": ["role": "assistant", "content": handler(sys, user, n)]]], "usage": ["prompt_tokens": 10, "completion_tokens": 5]]), 200)
     }
@@ -39,7 +44,8 @@ final class Script: @unchecked Sendable {
         var ctx = AgentContext(db: db, storage: ManagedStorage(root: dir.appendingPathComponent("store")), gateway: gw, now: { Self.today }, calendar: Self.utc)
         ctx.calendar = Self.utc
         let store = ctx.store
-        return E(db: db, ctx: ctx, runner: AgentRunner(ctx), store: store, script: script, dir: dir, conv: try store.createConversation().id)
+        let runner = AgentRunner(ctx); runner.generatesTitles = false      // title generation has its own tests; here it would consume scripted replies
+        return E(db: db, ctx: ctx, runner: runner, store: store, script: script, dir: dir, conv: try store.createConversation().id)
     }
     func call(_ tool: String, _ args: [String: Any]) -> String { String(data: try! JSONSerialization.data(withJSONObject: ["tool": tool, "args": args]), encoding: .utf8)! }
     func msgs(_ e: E) throws -> [ChatMessage] { try e.store.messages(e.conv) }
@@ -67,7 +73,7 @@ final class Script: @unchecked Sendable {
     @Test func registryDescribesEverythingAndGatesWrites() {
         let all = AgentRegistry.all()
         #expect(Set(all.map(\.name)).count == all.count)
-        for t in all { #expect(!t.summary.isEmpty); if t.permission != .read && t.name != "studyPlans.create" { #expect(t.requiresApproval, "\(t.name) must need approval") } }
+        for t in all { #expect(!t.summary.isEmpty); if t.permission != .read && !["studyPlans.create", "studyMap.create"].contains(t.name) { #expect(t.requiresApproval, "\(t.name) must need approval") } }
         #expect(AgentRegistry.spec("courses.delete")?.permission == .destructive && AgentRegistry.spec("courses.list")?.requiresApproval == false)
     }
 
@@ -346,7 +352,7 @@ final class Script: @unchecked Sendable {
             let c = try e.ctx.courses.createCourse(name: "Keep"); courseId = c.id; convId = e.conv
             try e.store.setCourse(e.conv, c.id)
             await e.runner.send(e.conv, text: "Let's continue preparing for Keep")
-            #expect(try e.store.conversation(e.conv)?.title == "Let's continue preparing for Keep")
+            #expect(try e.store.conversation(e.conv)?.title == "Continue Preparing Keep")
         }
         let db = try AppDatabase.open(at: url); let store = AgentStore(db: db)             // "restart"
         #expect(try store.messages(convId).map(\.role).contains(.user) && (try store.messages(convId).last?.content) == "Saved.")

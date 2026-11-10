@@ -6,9 +6,34 @@ import AppKit
 /// the source folder and a content fingerprint into Info.plist; otherwise the feature stays hidden.
 @MainActor
 final class UpdateModel: ObservableObject {
-    enum State: Equatable { case idle, checking, upToDate, available(String), updating(String), failed(String) }
+    enum State: Equatable { case idle, checking, upToDate, available(String), updating(Progress), failed(String) }
     @Published private(set) var state = State.idle
     @Published var dismissed = false
+
+    /// What the banner shows while updating. `fraction` is an estimate from how long each step took last time.
+    struct Progress: Equatable {
+        var step = 0, steps = Steps.names.count
+        var label = "Getting ready"
+        var fraction = 0.0
+        var elapsed = 0, remaining: Int?
+    }
+    enum Steps {
+        static let names = ["Fetching changes", "Building the core", "Building the app", "Packaging", "Installing"]
+        static let defaults: [Double] = [3, 45, 15, 8, 4]                                    // first-run guesses, replaced by measured times
+        static func expected() -> [Double] {
+            let saved = UserDefaults.standard.array(forKey: "updateStepSeconds") as? [Double]
+            return saved?.count == names.count ? saved! : defaults
+        }
+        /// Which step a log line belongs to (nil = no change).
+        static func index(of line: String) -> Int? {
+            if line.contains("Packaging") { return 3 }
+            if line.contains("Installing") || line.contains("Quitting") { return 4 }
+            if line.contains("Braincell.app") { return 2 }
+            if line.contains("BraincellCore") || line.contains("GRDB") { return 1 }
+            return nil
+        }
+    }
+    private var cancelled = false
 
     let root: String?
     private let installed: String?
@@ -51,12 +76,27 @@ final class UpdateModel: ObservableObject {
 
     func update() {
         guard let root, !isUpdating else { return }
-        state = .updating("Starting…")
+        cancelled = false
+        state = .updating(Progress(label: Steps.names[0]))
         let ready = root + "/.build-manual/update-ready", log = root + "/.build-manual/update.log", pull = behind > 0
+        try? FileManager.default.removeItem(atPath: log)
+        let expected = Steps.expected()
+        let total = expected.reduce(0, +), began = Date()
         poll = Task { [weak self] in
+            var step = pull ? 0 : 1, stepStart = Date(), measured = expected
             while !Task.isCancelled {
                 if FileManager.default.fileExists(atPath: ready) { NSApp.terminate(nil); return }      // build finished: quit so the script can swap the app and relaunch
-                if let t = try? String(contentsOfFile: log, encoding: .utf8), let l = t.split(separator: "\n").last(where: { $0.hasPrefix("»") }) { self?.setProgress(String(l)) }
+                if let t = try? String(contentsOfFile: log, encoding: .utf8) {
+                    for line in t.split(separator: "\n") where line.hasPrefix("»") { if let k = Steps.index(of: String(line)), k > step {
+                        measured[step] = Date().timeIntervalSince(stepStart)          // remember how long the finished step really took
+                        UserDefaults.standard.set(measured, forKey: "updateStepSeconds")
+                        step = k; stepStart = Date()
+                    } }
+                }
+                let inStep = Date().timeIntervalSince(stepStart)
+                let done = expected[..<step].reduce(0, +) + min(inStep, expected[step] * 0.95)
+                let el = Int(Date().timeIntervalSince(began))
+                self?.setProgress(Progress(step: step, label: Steps.names[step], fraction: min(0.98, done / total), elapsed: el, remaining: max(1, Int(total - done))))
                 try? await Task.sleep(nanoseconds: 500_000_000)
             }
         }
@@ -66,10 +106,19 @@ final class UpdateModel: ObservableObject {
                 return Self.sh("mkdir -p .build-manual && LEARN_ANYWAY_SELF_UPDATE=1 scripts/install-macos.sh > .build-manual/update.log 2>&1; c=$?; [ $c -ne 0 ] && tail -n 12 .build-manual/update.log; exit $c", in: root, timeout: 1800)
             }.value
             poll?.cancel()
+            if cancelled { state = .idle; return }
             if r.0 != 0 { state = .failed(r.1.trimmingCharacters(in: .whitespacesAndNewlines).suffix(600).description) }
         }
     }
-    private func setProgress(_ s: String) { if isUpdating { state = .updating(s) } }
+
+    /// Stops a running update. The installed app is only replaced in the last second, so cancelling never leaves a half-installed app.
+    func cancelUpdate() {
+        guard let root, isUpdating else { return }
+        cancelled = true; poll?.cancel()
+        state = .idle
+        Task.detached { _ = Self.sh("pkill -f scripts/install-macos.sh; pkill -f 'swiftc.*out-release'; rm -f .build-manual/update-ready", in: root, timeout: 10) }
+    }
+    private func setProgress(_ p: Progress) { if isUpdating { state = .updating(p) } }
 
     final class Handle: @unchecked Sendable { let p: Process; init(_ p: Process) { self.p = p } }
 
@@ -90,6 +139,7 @@ final class UpdateModel: ObservableObject {
 
 struct UpdateBanner: View {
     @ObservedObject var u: UpdateModel
+    private func clock(_ s: Int) -> String { String(format: "%d:%02d", s / 60, s % 60) }
     var body: some View {
         switch u.state {
         case .available(let why) where !u.dismissed:
@@ -97,8 +147,17 @@ struct UpdateBanner: View {
                 Button("Update now") { u.update() }.buttonStyle(.primary)
                 Button("Later") { u.dismissed = true }
             }
-        case .updating(let s):
-            row(symbol: "hourglass", tint: Theme.accent, text: "Updating… \(s.replacingOccurrences(of: "» ", with: "")). Learn Anyway restarts by itself when the build is ready, so keep working until then.") { ProgressView().controlSize(.small) }
+        case .updating(let p):
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Text("Updating · step \(p.step + 1) of \(p.steps): \(p.label)").font(.callout.weight(.semibold))
+                    Spacer()
+                    Text("\(clock(p.elapsed)) elapsed" + (p.remaining.map { " · about \(clock($0)) left" } ?? "")).font(.callout).foregroundStyle(Theme.textSecondary).monospacedDigit()
+                    Button("Cancel") { u.cancelUpdate() }
+                }
+                ProgressView(value: p.fraction)
+                Text("You can keep working. Learn Anyway restarts by itself when the build is ready.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+            }.padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm).background(Theme.accent.opacity(0.12)).overlay(alignment: .top) { Rectangle().fill(Theme.accent.opacity(0.35)).frame(height: 1) }
         case .failed(let m):
             row(symbol: "exclamationmark.triangle.fill", tint: Theme.error, text: "Update failed. Your current version is untouched. \(m)") {
                 Button("Try again") { u.check() }

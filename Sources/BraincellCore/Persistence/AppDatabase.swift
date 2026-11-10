@@ -642,6 +642,28 @@ public final class AppDatabase: Sendable {
                 t.add(column: "pricedAt", .datetime)
             }
         }
+        m.registerMigration("v15_chat_workflow") { db in
+            try db.alter(table: "chat_conversations") { t in
+                t.add(column: "titleLocked", .boolean).notNull().defaults(to: false)       // the learner renamed it: never overwrite
+                t.add(column: "titleGenerated", .boolean).notNull().defaults(to: false)    // a model title was already applied: never regenerate
+            }
+            try db.alter(table: "chat_messages") { t in
+                t.add(column: "supersededAt", .datetime)                                    // set when an edit or regenerate replaced this message; kept for recovery
+                t.add(column: "supersededBy", .blob)
+                t.add(column: "editedFrom", .blob)
+            }
+            try db.create(table: "study_maps") { t in
+                t.primaryKey("id", .blob)
+                t.column("conversationId", .blob).references("chat_conversations", onDelete: .setNull)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .setNull)
+                t.column("title", .text).notNull()
+                t.column("mapJSON", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "study_maps_on_course", on: "study_maps", columns: ["courseId", "updatedAt"])
+        }
         return m
     }
 

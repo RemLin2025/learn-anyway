@@ -22,7 +22,10 @@ public protocol SecretStore: Sendable {
     func read(_ account: String) throws -> String?
     func write(_ account: String, value: String) throws
     func delete(_ account: String) throws
+    /// Whether a credential exists. Must not read the secret itself, so a Keychain-backed store can answer without an authorization prompt.
+    func contains(_ account: String) -> Bool
 }
+public extension SecretStore { func contains(_ account: String) -> Bool { ((try? read(account)) ?? nil) != nil } }
 
 /// The key lives in the login Keychain, never in the database, backups, logs or exports.
 /// `legacyService` is the pre-rename (CramLab) entry: a key found only there is copied to `service` on first read.
@@ -40,6 +43,14 @@ public struct KeychainSecretStore: SecretStore {
         if st == errSecItemNotFound { return nil }
         guard st == errSecSuccess, let d = out as? Data else { throw DirectAIError.keychain(st) }
         return String(data: d, encoding: .utf8)
+    }
+    /// Attributes-only lookup: macOS doesn't ask for authorization because no secret data is returned.
+    public func contains(_ account: String) -> Bool {
+        for s in [service, legacyService].compactMap({ $0 }) {
+            var q = query(account, s); q[kSecReturnAttributes as String] = true; q[kSecMatchLimit as String] = kSecMatchLimitOne
+            if SecItemCopyMatching(q as CFDictionary, nil) == errSecSuccess { return true }
+        }
+        return false
     }
     private func remove(_ account: String, service: String) throws {
         let st = SecItemDelete(query(account, service) as CFDictionary)
@@ -91,8 +102,13 @@ public enum DirectAIError: Error, LocalizedError, Equatable {
         case .http(let c, let m): "The API refused the request (\(c)): \(m)"
         case .malformedResponse: "The API answered in a way Learn Anyway couldn’t read. The request is unchanged; use the manual route instead."
         case .refused(let m): m
-        case .keychain(let s): "The Keychain refused the operation (code \(s))."
+        case .keychain(let s): isDenied ? "macOS denied access to the saved API key (code \(s))." : "The Keychain refused the operation (code \(s))."
         }
+    }
+    /// The user (or macOS) refused to let Learn Anyway read the item, as opposed to a missing or broken item.
+    public var isDenied: Bool {
+        if case .keychain(let s) = self { return [-128, -25293, -25308, -25243].contains(s) }     // userCanceled, authFailed, interactionNotAllowed, noAccessForItem
+        return false
     }
 }
 
@@ -108,7 +124,7 @@ public struct DirectAIService: Sendable {
     }
 
     public var isEnabled: Bool { (try? settings.bool(.directAPIEnabled)) ?? false }
-    public var hasKey: Bool { ((try? secrets.read(Self.keyAccount)) ?? nil) != nil }
+    public var hasKey: Bool { secrets.contains(Self.keyAccount) }
     public var model: String { ((try? settings.string(.directAPIModel)) ?? nil).flatMap { $0.isEmpty ? nil : $0 } ?? Self.defaultModel }
 
     /// The exact bytes that would be sent, for the confirmation sheet. Contains no key.

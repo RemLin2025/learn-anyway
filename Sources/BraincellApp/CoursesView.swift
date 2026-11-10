@@ -33,7 +33,7 @@ struct CoursesView: View {
                                    message: "Create a course for an exam, or start a Quick Cram on a single topic.",
                                    actionTitle: "New Course") { showNew = true }
                 } else {
-                    EmptyStateView(symbol: "sidebar.left", title: "Select a course", message: "Choose a course to manage its assessments, topics and materials.")
+                    CourseCardGrid(onNew: { showNew = true })
                 }
             }
             .frame(minWidth: 520)
@@ -371,5 +371,78 @@ struct DeletedSheet: View {
             Divider()
             RecentlyDeletedView()
         }.frame(width: 680, height: 480).background(Theme.background)
+    }
+}
+
+
+// MARK: Course overview
+
+/// What you see before opening a course: one card per course with what matters at a glance.
+struct CourseCardGrid: View {
+    @EnvironmentObject var model: AppModel
+    let onNew: () -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                HStack {
+                    Text("Your courses").font(Theme.pageTitle)
+                    Spacer()
+                    Button { onNew() } label: { Label("New Course", systemImage: "plus") }.buttonStyle(.primary)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 360), spacing: Theme.Space.lg)], spacing: Theme.Space.lg) {
+                    ForEach(model.courseList) { c in CourseCard(course: c) { model.selectedCourseID = c.id } }
+                }
+            }.padding(Theme.Space.xl)
+        }
+    }
+}
+
+struct CourseCard: View {
+    @EnvironmentObject var model: AppModel
+    let course: Course
+    let open: () -> Void
+    @State private var questions: Int?
+    @State private var materials: Int?
+    @State private var next: Assessment?
+    @State private var hover = false
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
+                HStack(spacing: Theme.Space.sm) {
+                    Image(systemName: course.kind == .quickCram ? "bolt.fill" : "graduationcap.fill").foregroundStyle(course.kind == .quickCram ? Theme.attention : Theme.accent)
+                        .frame(width: 32, height: 32).background((course.kind == .quickCram ? Theme.attention : Theme.accent).opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.control)).accessibilityHidden(true)
+                    Text(course.name).font(Theme.cardTitle).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                if let n = next, let d = n.deadline {
+                    let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: d)).day ?? 0
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(n.name).font(.system(.callout, design: .rounded, weight: .medium)).lineLimit(1)
+                        Text(days == 0 ? "Today" : days == 1 ? "Tomorrow" : "In \(days) days · " + d.formatted(date: .abbreviated, time: .omitted)).font(Theme.meta).foregroundStyle(days <= 3 ? Theme.attention : Theme.textSecondary)
+                    }
+                } else { Text("No upcoming assessment").font(.callout).foregroundStyle(Theme.textSecondary) }
+                Divider()
+                HStack(spacing: Theme.Space.lg) {
+                    stat(questions, "questions"); stat(materials, "materials")
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
+            .background(hover ? Theme.elevated.opacity(0.5) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(hover ? Theme.accent.opacity(0.5) : Theme.border))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        }
+        .buttonStyle(.plain).onHover { hover = $0 }.motion(value: hover)
+        .accessibilityLabel("\(course.name), \(questions.map { "\($0) questions" } ?? ""), \(materials.map { "\($0) materials" } ?? "")")
+        .task(id: model.revision) {
+            var f = QuestionFilter(); f.courseId = course.id
+            questions = (try? model.questions?.list(f))?.count
+            materials = (try? model.documents?.documents(courseId: course.id))?.count
+            let now = Calendar.current.startOfDay(for: Date())
+            next = ((try? model.courses?.assessments(courseId: course.id)) ?? []).filter { ($0.deadline ?? .distantPast) >= now }.min { ($0.deadline ?? .distantFuture) < ($1.deadline ?? .distantFuture) }
+        }
+    }
+    private func stat(_ n: Int?, _ label: String) -> some View {
+        HStack(spacing: 4) { Text(n.map(String.init) ?? "–").font(.system(.callout, design: .rounded, weight: .semibold)).monospacedDigit(); Text(label).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
     }
 }

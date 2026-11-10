@@ -7,9 +7,10 @@ struct MessageRow: View {
 
     var body: some View {
         switch (message.role, message.kind) {
-        case (.user, _): UserBubble(text: message.content)
+        case (.user, _): UserBubble(chat: chat, message: message)
         case (.assistant, .approval): ApprovalCard(chat: chat, message: message)
         case (.assistant, .plan): PlanCard(chat: chat, message: message)
+        case (.assistant, .map): MapCard(chat: chat, message: message)
         case (.assistant, .preview): PreviewCard(chat: chat, message: message)
         case (.assistant, .actions): ChipRow(chat: chat, message: message)
         case (.assistant, _): AssistantText(text: message.content)
@@ -21,12 +22,85 @@ struct MessageRow: View {
 }
 
 struct UserBubble: View {
-    let text: String
+    @ObservedObject var chat: ChatModel
+    let message: ChatMessage
+    @State private var editing = false
+    @State private var draft = ""
+    @State private var hover = false
     var body: some View {
-        HStack { Spacer(minLength: 60)
-            Text(text).textSelection(.enabled).padding(.horizontal, 14).padding(.vertical, 9)
-                .background(Theme.elevated, in: RoundedRectangle(cornerRadius: 18)) }
-            .accessibilityLabel("You: \(text)")
+        VStack(alignment: .trailing, spacing: 4) {
+            if editing {
+                VStack(alignment: .trailing, spacing: 6) {
+                    TextEditor(text: $draft).font(.body).frame(minHeight: 60, maxHeight: 160).fieldSurface().accessibilityLabel("Edit your message")
+                    Text("Sending replaces this message and everything after it. The earlier version is kept and can be restored.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    HStack { Button("Cancel") { editing = false }; Button("Send edit") { chat.edit(message.id, text: draft); editing = false }.buttonStyle(.primary).disabled(draft.trimmed.isEmpty || chat.thinking) }
+                }.frame(maxWidth: 560)
+            } else {
+                HStack(alignment: .bottom, spacing: 6) {
+                    Spacer(minLength: 60)
+                    Button { draft = message.content; editing = true } label: { Image(systemName: "pencil").frame(width: 26, height: 26).contentShape(Rectangle()) }.buttonStyle(.plain)
+                        .foregroundStyle(Theme.textSecondary).opacity(hover && !chat.thinking ? 1 : 0).help("Edit message").accessibilityLabel("Edit message").disabled(chat.thinking)
+                    Text(message.content).textSelection(.enabled).padding(.horizontal, 14).padding(.vertical, 9).background(Theme.elevated, in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
+            if message.editedFrom != nil, let n = try? chat.store.replacedCount(by: message.id), n > 0 {
+                HStack(spacing: 6) {
+                    Text("Edited · \(n) earlier message\(n == 1 ? "" : "s") archived").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    Button("Restore previous version") { chat.restoreEdit(message.id) }.buttonStyle(.plain).font(Theme.meta).foregroundStyle(Theme.accent).disabled(chat.thinking)
+                }
+            }
+        }.frame(maxWidth: .infinity, alignment: .trailing).onHover { hover = $0 }.accessibilityElement(children: .contain)
+    }
+}
+
+/// The saved topic map and problem analysis. Instructor-stated importance and AI estimates are labelled differently on purpose.
+struct MapCard: View {
+    @ObservedObject var chat: ChatModel
+    let message: ChatMessage
+    @State private var open = true
+    private var mapId: UUID? { (message.payload.flatMap { try? JSONSerialization.jsonObject(with: Data($0.utf8)) } as? [String: String])?["mapId"].flatMap(UUID.init) }
+    var body: some View {
+        if let id = mapId, let rec = try? chat.store.map(id), let d = rec.document {
+            Card {
+                VStack(alignment: .leading, spacing: Theme.Space.sm) {
+                    Button { open.toggle() } label: {
+                        HStack { Label(rec.title, systemImage: "map").font(Theme.cardTitle); Spacer(); Text("\(d.topics.count) topics · \(d.structures.count) examples").font(Theme.meta).foregroundStyle(Theme.textSecondary); Image(systemName: open ? "chevron.up" : "chevron.down").font(.caption) }.contentShape(Rectangle())
+                    }.buttonStyle(.plain).accessibilityLabel("Study map \(rec.title), \(open ? "expanded" : "collapsed")")
+                    if open {
+                        ForEach(d.topics) { t in
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack { Text(t.name).font(.system(.callout, design: .rounded, weight: .semibold)); importance(t.importance); if !t.sourced { Badge(text: "Unsourced", color: Theme.attention) } }
+                                if !t.objectives.isEmpty { Text(t.objectives.joined(separator: " · ")).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                                if !t.sources.isEmpty { Text("Sources: " + t.sources.map { "\($0.documentName)\($0.page.map { " p.\($0)" } ?? "")" }.joined(separator: "; ")).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
+                                if !t.importance.evidence.isEmpty { Text(t.importance.evidence).font(Theme.meta).foregroundStyle(Theme.textSecondary).italic().lineLimit(2) }
+                            }
+                        }
+                        if !d.structures.isEmpty {
+                            Divider()
+                            Text("Problem structures").font(Theme.cardTitle)
+                            ForEach(d.structures) { s in
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text("\(s.family) · \(s.source.documentName)\(s.source.page.map { " p.\($0)" } ?? "")").font(.system(.callout, design: .rounded, weight: .medium))
+                                    Text("Extra step: \(s.extraStep)").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                                }
+                            }
+                        }
+                        Divider()
+                        Label(d.research.note, systemImage: "globe").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                        if !d.coverageGaps.isEmpty { Label("Not covered (unreadable): " + d.coverageGaps.joined(separator: ", "), systemImage: "exclamationmark.triangle").font(Theme.meta).foregroundStyle(Theme.attention) }
+                        if !d.warnings.isEmpty { DisclosureGroup("\(d.warnings.count) check(s) adjusted this map") { ForEach(d.warnings, id: \.self) { Text("• " + $0).font(Theme.meta).foregroundStyle(Theme.textSecondary) } }.font(Theme.meta) }
+                        Text("To change importance, topics or sources, tell me in chat and I’ll update this map.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
+                    }
+                }
+            }
+        }
+    }
+    @ViewBuilder private func importance(_ i: StudyMapDocument.Importance) -> some View {
+        switch i.source {
+        case .instructor: Badge(text: "Instructor: \(i.level)\(i.weightPercent.map { " \(Int($0))%" } ?? "")", color: Theme.mastery)
+        case .estimated: Badge(text: "AI estimate: \(i.level)", color: Theme.attention)
+        case .unknown: Badge(text: "Importance unknown", color: Theme.textSecondary)
+        }
     }
 }
 

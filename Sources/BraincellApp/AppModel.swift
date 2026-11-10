@@ -70,7 +70,8 @@ final class AppModel: ObservableObject {
     @Published var directAPIEnabled = false
     @Published var directAPIModel = DirectAIService.defaultModel
     @Published var hasAPIKey = false
-    let secrets: SecretStore = KeychainSecretStore(legacyService: "com.cramlab.api-keys")
+    /// Every key read in the app goes through this one cached manager (the Keychain is only asked once per key per session).
+    let secrets: SecretStore = CredentialManager(KeychainSecretStore(legacyService: "com.cramlab.api-keys"))
     private lazy var sandboxRunner = SandboxedCodeRunner()
     @Published var confidencePrompts = "minimal"
     @Published var snapshotMap = false
@@ -112,7 +113,7 @@ final class AppModel: ObservableObject {
             codeExecutionEnabled = (try? settings?.bool(.codeExecutionEnabled)) ?? false
             directAPIEnabled = (try? settings?.bool(.directAPIEnabled)) ?? false
             if let m = (try? settings?.string(.directAPIModel)) ?? nil, !m.isEmpty { directAPIModel = m }
-            hasAPIKey = ((try? secrets.read(DirectAIService.keyAccount)) ?? nil) != nil
+            hasAPIKey = secrets.contains(DirectAIService.keyAccount)       // existence only: no Keychain prompt at launch
             confidencePrompts = (try? settings?.string(.confidencePrompts)) ?? "minimal"
             startupError = nil
             appearance = (try? settings?.appearance()) ?? .system

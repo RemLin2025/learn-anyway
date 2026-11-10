@@ -179,3 +179,9 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - On launch (toggle in Settings → General → Updates) `UpdateModel` compares the stamp with the source folder and, when the branch tracks a remote, runs `git fetch`. A bottom banner offers Update now / Later.
 - Update now: optional `git pull --ff-only`, then the install script rebuilds in the background; when ready the app quits itself and the script swaps `/Applications/Learn Anyway.app` and relaunches. Failures leave the current app untouched and show the log tail.
 - Verified: detection and banner (test bundle with a stale fingerprint). Not run end to end: the actual rebuild, swap and relaunch.
+
+## Study assistant workflow (chat)
+- Requests are role-based (`LLMRequest.messages`, merged/alternating for OpenAI-compatible, Anthropic and Ollama); instructions stay in `system`. Single-prompt callers are unchanged.
+- Chats: search, edit (archives the old branch, restorable), regenerate, auto title (deterministic fallback, one model title, never over a rename), interrupted-work recovery on launch (migration v15).
+- Exam workflow tools: `sources.status`, `sources.search` (ranked across all documents, with page provenance and coverage gaps), `studyMap.create/get` (verified source refs; instructor weight needs a quote found in the material; estimates carry no percentage; research rejected because no web tool exists).
+- Stages shown are real tool/workflow steps. No streaming, no OCR/vision, no web research, no independent answer verification (questions stay "Unverified").

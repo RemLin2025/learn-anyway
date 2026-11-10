@@ -18,7 +18,12 @@ public struct ToolSpec: Sendable {
     let run: @Sendable (ToolArgs, AgentContext, ToolRunInfo) async throws -> ToolOutput
 }
 
-public struct ToolRunInfo: Sendable { public let conversationId: UUID; public let actionId: UUID }
+public struct ToolRunInfo: Sendable {
+    public let conversationId: UUID; public let actionId: UUID
+    /// Reports a real workflow stage ("Validating results") to the UI while the tool runs.
+    public var stage: @Sendable (String) -> Void
+    public init(conversationId: UUID, actionId: UUID, stage: @escaping @Sendable (String) -> Void = { _ in }) { self.conversationId = conversationId; self.actionId = actionId; self.stage = stage }
+}
 
 /// A navigation or follow-up button. Every one maps to a real app operation the UI performs.
 public struct ActionChip: Codable, Sendable, Equatable, Hashable {
@@ -37,9 +42,10 @@ public struct ToolOutput: Sendable {
     public var untrusted = false             // contains document text: wrapped before the model sees it
     public var planId: UUID?
     public var generationId: UUID?
+    public var mapId: UUID?
     public var chips: [ActionChip] = []
-    public init(text: String, summary: String, untrusted: Bool = false, planId: UUID? = nil, generationId: UUID? = nil, chips: [ActionChip] = []) {
-        self.text = text; self.summary = summary; self.untrusted = untrusted; self.planId = planId; self.generationId = generationId; self.chips = chips
+    public init(text: String, summary: String, untrusted: Bool = false, planId: UUID? = nil, generationId: UUID? = nil, mapId: UUID? = nil, chips: [ActionChip] = []) {
+        self.text = text; self.summary = summary; self.untrusted = untrusted; self.planId = planId; self.generationId = generationId; self.mapId = mapId; self.chips = chips
     }
 }
 

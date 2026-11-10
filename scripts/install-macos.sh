@@ -18,6 +18,7 @@ CONFIG=release scripts/build.sh app
 BUILT=$ROOT/.build-manual/out-release/Braincell.app/Contents
 
 # 2. Assemble the bundle
+echo "» Packaging"
 ICON=$ROOT/scripts/icon/AppIcon.icns
 if [ ! -f "$ICON" ]; then
   echo "» Generating placeholder icon"
@@ -40,11 +41,22 @@ $PB -c "Set :CFBundleVersion $(date +%Y%m%d%H%M)" "$PL"
 $PB -c "Add :SourceRoot string $ROOT" "$PL"
 $PB -c "Add :SourceFingerprint string $FP" "$PL"
 chmod 755 "$STAGE/Contents/MacOS/$EXE"
-codesign --force --deep --sign - "$STAGE"   # ad-hoc: enough for a local, personal app
+# Prefer the stable local identity (scripts/setup-signing.sh): macOS then recognises every build as the same app, so Keychain
+# permission you granted keeps applying. Ad-hoc signing is only a fallback: each build then looks like a new app to the Keychain.
+SIGN_ID="${SIGN_IDENTITY:-}"
+[ -z "$SIGN_ID" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "Learn Anyway Local Signing" && SIGN_ID="Learn Anyway Local Signing"
+if [ -n "$SIGN_ID" ]; then
+  codesign --force --deep --sign "$SIGN_ID" "$STAGE"
+else
+  echo "! Signing ad-hoc: macOS will ask again for Keychain access after each update. Run scripts/setup-signing.sh once to stop that."
+  codesign --force --deep --sign - "$STAGE"
+fi
+codesign -d -r- "$STAGE" 2>&1 | sed -n 's/^# designated => /» identity: /p' | cut -c1-120
 plutil -lint "$PL" >/dev/null
 codesign --verify --deep --strict "$STAGE"
 
 # 3. Install
+echo "» Installing"
 DEST_DIR=/Applications
 [ -w "$DEST_DIR" ] || { DEST_DIR=$HOME/Applications; mkdir -p "$DEST_DIR"; echo "! /Applications not writable; installing to $DEST_DIR"; }
 DEST=$DEST_DIR/$NAME.app

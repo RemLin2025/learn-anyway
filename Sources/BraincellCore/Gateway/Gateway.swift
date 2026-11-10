@@ -83,7 +83,7 @@ public final class AIGateway: @unchecked Sendable {
     public func refreshModels(_ c: AIConnection) async throws -> Int {
         var u = c
         do {
-            let found = try await client.listModels(c, key: try secrets.read(c.keyAccount))
+            let found = try await client.listModels(c, key: try credential(for: c))
             try store.merge(discovered: found.map { record($0, c) })
             u.status = c.enabled ? .ready : .disabled; u.lastCheckedAt = now(); try store.save(u)
             return found.count
@@ -99,7 +99,20 @@ public final class AIGateway: @unchecked Sendable {
     /// Applies a non-secret settings export using the app's own Keychain; returns the connections that still need a key.
     public func importConfig(_ c: GatewayConfigExport) throws -> [String] { try c.apply(to: store, secrets: secrets) }
 
-    public func hasKey(_ c: AIConnection) -> Bool { ((try? secrets.read(c.keyAccount)) ?? nil)?.isEmpty == false }
+    public func hasKey(_ c: AIConnection) -> Bool { secrets.contains(c.keyAccount) }
+
+    /// The connection's API key, read through the session cache. Keychain problems become their own error (named after the provider),
+    /// so they are never mistaken for a network failure and never retried.
+    func credential(for c: AIConnection) throws -> String? {
+        do { return try secrets.read(c.keyAccount) }
+        catch let e as DirectAIError where e.isDenied {
+            throw GatewayError.keychain("macOS denied access to the saved \(c.name) API key. Learn Anyway won’t ask again until you press Retry. If the prompt keeps appearing, choose “Always Allow” in it, or enter the key again in Settings → AI Provider Plans.")
+        } catch {
+            throw GatewayError.keychain("The Keychain couldn’t be read for \(c.name) (\((error as? DirectAIError)?.errorDescription ?? "unknown error")). Check that your login Keychain is unlocked, then press Retry.")
+        }
+    }
+    /// Lets the next credential read ask macOS again after an earlier denial. Only call from an explicit user action.
+    public func retryCredentialAccess() { (secrets as? CredentialManager)?.retryAfterDenial() }
 
     /// Deletes the stored key and the connection (models and defaults go with it; task routes revert to inheriting).
     public func disconnect(_ c: AIConnection) throws { try secrets.delete(c.keyAccount); try store.removeConnection(c.id) }
@@ -135,7 +148,7 @@ public final class AIGateway: @unchecked Sendable {
     static func usd(_ v: Double) -> String { String(format: "$%.2f", v) }
 
     @discardableResult
-    public func complete(task: WorkflowTask, prompt: String, courseId: UUID? = nil, label: String? = nil, system: String? = nil) async throws -> LLMResult {
+    public func complete(task: WorkflowTask, prompt: String, courseId: UUID? = nil, label: String? = nil, system: String? = nil, messages: [LLMMessage]? = nil) async throws -> LLMResult {
         guard task.capability == .llm else { throw GatewayError.unsupported("\(task.title) isn’t an LLM task, and no adapter for \(task.capability.label) exists in this build yet.") }
         let res = try resolve(task)
         if res.manual { throw GatewayError.manualRequired("\(task.title) is set to the manual ChatGPT Bridge. Prepare the request and import the reply yourself.") }
@@ -144,15 +157,18 @@ public final class AIGateway: @unchecked Sendable {
         let route = try store.route(task.id)
         var req = LLMRequest(prompt: prompt, system: [system, route.instruction?.isEmpty == false ? route.instruction : nil].compactMap { $0 }.joined(separator: "\n\n").nilIfEmpty,
                              temperature: route.temperature, maxTokens: route.maxTokens, timeout: TimeInterval(max(5, route.timeoutSeconds)))
-        req.prompt = prompt
+        req.prompt = prompt; req.messages = messages
         var last: Error = GatewayError.malformed
         for (i, target) in [primary, res.fallback].compactMap({ $0 }).enumerated() {
             let tries = max(0, min(route.maxRetries, 3)) + 1            // hard ceiling: a billable call is never repeated without bound
+            let key: String?                                             // resolved once per target (cached), never inside the retry loop
+            do { key = try credential(for: target.connection) }
+            catch { last = error; try? log(target, task, courseId, now(), nil, error as? GatewayError); continue }
             for attempt in 1...tries {
                 if Task.isCancelled { throw GatewayError.cancelled }
                 let started = now()
                 do {
-                    var out = try await client.complete(target.connection, model: target.model.modelId, key: try secrets.read(target.connection.keyAccount), req)
+                    var out = try await client.complete(target.connection, model: target.model.modelId, key: key, req)
                     out.trace = res.trace + (i == 1 ? ["Answered by the fallback model."] : [])
                     try log(target, task, courseId, started, out, nil)
                     return out
@@ -173,7 +189,7 @@ public final class AIGateway: @unchecked Sendable {
     public func test(_ t: Target) async -> Result<String, GatewayError> {
         let started = now()
         do {
-            let out = try await client.complete(t.connection, model: t.model.modelId, key: try secrets.read(t.connection.keyAccount),
+            let out = try await client.complete(t.connection, model: t.model.modelId, key: try credential(for: t.connection),
                                                 LLMRequest(prompt: "Reply with the single word OK.", maxTokens: 16, timeout: 30))
             try log(t, WorkflowTask.find("summaries")!, nil, started, out, nil, taskLabel: "test")
             var m = t.model; m.health = .ready; try store.save(m)

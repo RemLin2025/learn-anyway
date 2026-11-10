@@ -147,7 +147,7 @@ private struct UpdatesCard: View {
             }
         }
         private var status: String {
-            switch u.state { case .upToDate: "You’re up to date."; case .available(let w): "Update available: \(w)."; case .failed(let m): "Check failed: \(m)"; case .updating: "Updating…"; default: "" }
+            switch u.state { case .upToDate: "You’re up to date."; case .available(let w): "Update available: \(w)."; case .failed(let m): "Check failed: \(m)"; case .updating(let p): "Updating: \(p.label)…"; default: "" }
         }
     }
 }

@@ -22,30 +22,33 @@ extension NSColor {
 /// Design tokens. Use these, never raw hex values or magic numbers, in feature views.
 enum Theme {
     // Colors
-    static let background = Color(light: 0xF7F8FA, dark: 0x111318)
+    static let background = Color(light: 0xF6F8FB, dark: 0x111318)
     static let surface = Color(light: 0xFFFFFF, dark: 0x1C2028)
     static let elevated = Color(light: 0xEEEFF3, dark: 0x292E39)
     static let border = Color(light: 0xE9EAED, dark: 0x2C313B)
     static let textPrimary = Color(light: 0x202124, dark: 0xECEDEF)
     static let textSecondary = Color(light: 0x777B85, dark: 0x9A9EA8)
-    static let accent = Color(light: 0x7468E8, dark: 0x9286F7)
-    static let accentHover = Color(light: 0x6256D6, dark: 0xA195F9)
+    static let accent = Color(light: 0x2563EB, dark: 0x6EA0FF)
+    static let accentHover = Color(light: 0x1D4FD0, dark: 0x8DB6FF)
+    /// Background of filled buttons that carry white text (4.5:1 or better in both appearances).
+    static let accentFill = Color(light: 0x2563EB, dark: 0x2F63D0)
+    static let accentFillHover = Color(light: 0x1D4FD0, dark: 0x3B70DE)
     static let mastery = Color(light: 0x1E9B72, dark: 0x4FC4AD)          // success, readable as text on white
     static let attention = Color(light: 0xB9792C, dark: 0xE7B363)        // warning, readable as text on white
     static let warningFill = Color(light: 0xF2B45A, dark: 0xE7B363)
     static let error = Color(light: 0xD6505A, dark: 0xEE858C)
-    // The sidebar is dark in both appearances.
-    static let sidebar = Color(hex: 0x202120)
-    static let sidebarHover = Color.white.opacity(0.07)
-    static let sidebarSelected = Color.white.opacity(0.12)
-    static let sidebarText = Color(hex: 0xA9ACA9)
+    // The sidebar follows the appearance: a light rail in light mode, a deep neutral rail in dark mode.
+    static let sidebar = Color(light: 0xF1F4F9, dark: 0x171A20)
+    static let sidebarHover = Color(light: 0xE4E9F2, dark: 0x232831)
+    static let sidebarSelected = Color(light: 0xDCE7FB, dark: 0x1F2C45)
+    static let sidebarText = Color(light: 0x4B5565, dark: 0xA9B0BC)
 
     /// 4-point spacing scale.
     enum Space { static let xs: CGFloat = 4, sm: CGFloat = 8, md: CGFloat = 12, lg: CGFloat = 16, xl: CGFloat = 24, xxl: CGFloat = 32 }
-    enum Radius { static let control: CGFloat = 10, card: CGFloat = 16 }
+    enum Radius { static let control: CGFloat = 8, card: CGFloat = 12 }
 
     // Rounded type that scales with Dynamic Type.
-    static let pageTitle = Font.system(.largeTitle, design: .rounded, weight: .bold)
+    static let pageTitle = Font.system(.title, design: .rounded, weight: .bold)
     static let sectionTitle = Font.system(.title3, design: .rounded, weight: .semibold)
     static let cardTitle = Font.system(.headline, design: .rounded, weight: .semibold)
     static let meta = Font.system(.caption, design: .rounded)
@@ -179,7 +182,7 @@ struct PrimaryButtonStyle: ButtonStyle {
                 .padding(.horizontal, 14).padding(.vertical, 7)
                 .frame(minHeight: 28)
                 .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.control))
-                .background(configuration.isPressed || hover ? Theme.accentHover : Theme.accent, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+                .background(configuration.isPressed || hover ? Theme.accentFillHover : Theme.accentFill, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
                 .opacity(enabled ? 1 : 0.4)
                 .scaleEffect(configuration.isPressed ? 0.98 : 1)
                 .onHover { hover = $0 }
@@ -286,7 +289,7 @@ struct SidebarView: View {
             HStack(spacing: Theme.Space.sm) {
                 Image(systemName: "brain.head.profile").font(.system(size: 18, weight: .semibold)).foregroundStyle(.white)
                     .frame(width: 32, height: 32).background(Theme.accent, in: RoundedRectangle(cornerRadius: 9)).accessibilityHidden(true)
-                if !collapsed { Text("Learn Anyway").font(.system(.title3, design: .rounded, weight: .bold)).foregroundStyle(.white) }
+                if !collapsed { Text("Learn Anyway").font(.system(.title3, design: .rounded, weight: .bold)).foregroundStyle(Theme.textPrimary) }
             }
             .padding(.bottom, Theme.Space.lg).padding(.top, Theme.Space.xs).padding(.leading, 2)
             .accessibilityElement(children: .combine).accessibilityLabel("Learn Anyway")
@@ -303,7 +306,7 @@ struct SidebarView: View {
         .frame(maxHeight: .infinity)
         .background(Theme.sidebar)
         .motion(.easeOut(duration: 0.2), value: collapsed)
-        .environment(\.colorScheme, .dark)
+        .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
         .accessibilityElement(children: .contain).accessibilityLabel("Sidebar")
     }
 }
@@ -315,7 +318,7 @@ private struct SidebarLabel: View {
             Image(systemName: symbol).font(.system(size: 15, weight: .medium)).frame(width: 20)
             if !collapsed { Text(title).font(.system(.body, design: .rounded, weight: selected ? .semibold : .regular)); Spacer(minLength: 0) }
         }
-        .foregroundStyle(selected ? Color.white : Theme.sidebarText)
+        .foregroundStyle(selected ? Theme.accent : Theme.sidebarText)
         .padding(.horizontal, Theme.Space.md).padding(.vertical, 9)
         .frame(maxWidth: .infinity, alignment: collapsed ? .center : .leading)
         .background(selected ? Theme.sidebarSelected : (hover ? Theme.sidebarHover : .clear), in: RoundedRectangle(cornerRadius: Theme.Radius.control))

@@ -12,6 +12,8 @@ public enum GatewayError: Error, LocalizedError, Equatable {
     case cancelled
     case manualRequired(String)
     case unsupported(String)
+    /// macOS refused to release the saved key (or the Keychain failed). Never retried automatically and never counted as a model failure.
+    case keychain(String)
 
     public var errorDescription: String? {
         switch self {
@@ -22,7 +24,7 @@ public enum GatewayError: Error, LocalizedError, Equatable {
         case .network(let m): "Couldn’t reach the provider: \(m)"
         case .timeout: "The request timed out."
         case .malformed: "The provider’s reply couldn’t be read."
-        case .unavailable(let m), .budgetBlocked(let m), .manualRequired(let m), .unsupported(let m): m
+        case .unavailable(let m), .budgetBlocked(let m), .manualRequired(let m), .unsupported(let m), .keychain(let m): m
         case .cancelled: "Cancelled."
         }
     }
@@ -31,7 +33,7 @@ public enum GatewayError: Error, LocalizedError, Equatable {
         switch self {
         case .noKey, .invalidCredentials: "auth"; case .rateLimited: "rate_limit"; case .http(let c, _): "http_\(c)"
         case .network: "network"; case .timeout: "timeout"; case .malformed: "malformed"; case .unavailable: "unavailable"
-        case .budgetBlocked: "budget"; case .cancelled: "cancelled"; case .manualRequired: "manual"; case .unsupported: "unsupported"
+        case .keychain: "keychain"; case .budgetBlocked: "budget"; case .cancelled: "cancelled"; case .manualRequired: "manual"; case .unsupported: "unsupported"
         }
     }
     /// Only transient failures are retried; auth, malformed and budget errors never are.
@@ -44,8 +46,18 @@ public enum GatewayError: Error, LocalizedError, Equatable {
     }
 }
 
+/// One turn of an ordered conversation. Roles are limited to what every supported protocol accepts; instructions travel separately in `system`.
+public struct LLMMessage: Sendable, Equatable {
+    public enum Role: String, Sendable { case user, assistant }
+    public var role: Role
+    public var content: String
+    public init(_ role: Role, _ content: String) { self.role = role; self.content = content }
+}
+
 public struct LLMRequest: Sendable {
     public var prompt: String
+    /// When set, these ordered messages are sent instead of the single `prompt` (which is then ignored). Existing single-prompt callers are unchanged.
+    public var messages: [LLMMessage]?
     public var system: String?
     public var temperature: Double?
     public var maxTokens: Int?
@@ -137,6 +149,18 @@ public struct ProviderClient: Sendable {
 
     // MARK: Chat
 
+    /// The conversation as the providers expect it: strictly alternating, starting with a user turn. Adjacent turns of one role are merged,
+    /// and a history that would start with the assistant gets an explicit placeholder rather than being silently reordered.
+    static func wireMessages(_ req: LLMRequest) -> [[String: String]] {
+        guard let ms = req.messages, !ms.isEmpty else { return [["role": "user", "content": req.prompt]] }
+        var merged: [LLMMessage] = []
+        for m in ms where !m.content.isEmpty {
+            if let last = merged.last, last.role == m.role { merged[merged.count - 1].content += "\n\n" + m.content } else { merged.append(m) }
+        }
+        if merged.first?.role == .assistant { merged.insert(LLMMessage(.user, "(Earlier conversation omitted.)"), at: 0) }
+        return merged.map { ["role": $0.role.rawValue, "content": $0.content] }
+    }
+
     public func complete(_ conn: AIConnection, model: String, key: String?, _ req: LLMRequest) async throws -> LLMResult {
         guard let spec = conn.spec, spec.isImplemented else { throw GatewayError.unsupported("This provider isn’t supported yet.") }
         if spec.needsKey, (key ?? "").isEmpty { throw GatewayError.noKey }
@@ -145,14 +169,14 @@ public struct ProviderClient: Sendable {
         if spec.wire == .anthropic {
             path = "/messages"
             body["max_tokens"] = req.maxTokens ?? 4096                      // required by this API
-            body["messages"] = [["role": "user", "content": req.prompt]]
+            body["messages"] = Self.wireMessages(req)
             if let s = req.system { body["system"] = s }
             if let t = req.temperature { body["temperature"] = t }
         } else {
             path = spec.wire == .ollama ? "/v1/chat/completions" : "/chat/completions"
             var msgs: [[String: String]] = []
             if let s = req.system { msgs.append(["role": "system", "content": s]) }
-            msgs.append(["role": "user", "content": req.prompt])
+            msgs += Self.wireMessages(req)
             body["messages"] = msgs
             if let t = req.temperature { body["temperature"] = t }
             if let m = req.maxTokens { body[conn.providerId == "openai" ? "max_completion_tokens" : "max_tokens"] = m }
