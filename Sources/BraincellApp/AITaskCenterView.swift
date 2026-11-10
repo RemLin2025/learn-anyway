@@ -28,7 +28,7 @@ struct AITaskCenterView: View {
                     }
                 }
             }
-            .sidePanel().frame(minWidth: 220, idealWidth: 260, maxWidth: 320)
+            .sidePanel().listPaneWidth()
 
             Group {
                 if let id = selected, let task = tasks.first(where: { $0.id == id }) { TaskDetailView(task: task, importTarget: $importTarget).id(id) }

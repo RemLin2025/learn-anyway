@@ -22,7 +22,7 @@ Home chat (empty), Courses > Assessments, Library, Question Bank, AI Tasks, Prac
 ## Findings
 
 ### P1: structural, affects every screen
-1. **Dead title band.** About 88 px of empty dark space above content on every screen. Content starts low, and screens without a page title (Insights, Skills, Question Bank, Library with a different header) look unanchored. HIG: the toolbar/title area should carry the view title and actions (HIG Toolbars).
+1. **Window title is the app name and the title bar carries nothing.** (Corrected: the empty band seen in the snapshot PNGs is the native title bar, which the snapshot renders without traffic lights; a live screenshot shows it is normal chrome with the title "Learn Anyway" and the focus-timer button.) HIG says not to title windows with the app name; use the current screen. Fixed: window title now follows the screen.
 2. **No shared screen frame.** Each screen builds its own header: Home has a chat title row, Courses a big title + tabs, Library a title + chips + search + button in one row, Insights a "Course" picker row, Skills a different picker row, Question Bank a 6-control filter row. Same job, six layouts.
 3. **List-pane width and chrome differ per screen** (about 430 / 500 / 540 px; different divider and selection styles). Selected rows use a flat grey in lists and a blue tint in the nav.
 4. **Settings has two sidebars stacked next to the main rail**, so three columns of navigation before content. Settings sub-pages mix three header styles (General had a different title, Workflow has a title without a subtitle, others have a title and subtitle). Partly fixed in `4365fdb` (General).
@@ -48,6 +48,7 @@ Home chat (empty), Courses > Assessments, Library, Question Bank, AI Tasks, Prac
 - Window `minWidth: 900, minHeight: 560` is set; behavior at that size has not been checked.
 
 ## Corrections to the earlier (UXKIN-style) review
+- "Dead 88 px title band": wrong, snapshot artifact (see P1 #1).
 - "Practice progress bar empty": wrong. It shows submitted answers, not position.
 - "Icon-only nav has no labels": wrong. It was the collapsed state.
 - "Library chip spacing uneven": wrong. Padding is uniform; width differences come from label text.

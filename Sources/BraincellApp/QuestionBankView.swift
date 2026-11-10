@@ -21,7 +21,7 @@ struct QuestionBankView: View {
         VStack(spacing: 0) {
             filterBar
             HSplitView {
-                list.sidePanel().frame(minWidth: 320, idealWidth: 400)
+                list.sidePanel().listPaneWidth()
                 Group {
                     if selection.count > 1 { bulkPanel }
                     else if let detail { QuestionPreview(detail: detail) { editing = detail }.id(detail.revision.id) }

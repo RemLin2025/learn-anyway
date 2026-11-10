@@ -344,6 +344,8 @@ extension View {
         scrollContentBackground(.hidden).listStyle(.plain).background(Theme.surface)
             .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
     }
+    /// Width of every list pane beside a detail view, so panes don't jump between screens.
+    func listPaneWidth() -> some View { frame(minWidth: 260, idealWidth: 340, maxWidth: 460) }
     /// Toolbar strip above content (filters, pickers): surface background with a hairline below.
     func controlStrip() -> some View {
         background(Theme.surface).overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }

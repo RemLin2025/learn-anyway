@@ -42,7 +42,7 @@ struct SkillsView: View {
                             if let m, !m.isUnknown { Badge(text: m.confidence.label, color: color(m.confidence)) } else { Badge(text: "Unknown", color: Theme.textSecondary) }
                         }.tag(r.skill.id).accessibilityElement(children: .combine)
                     } }
-                    }.sidePanel().frame(minWidth: 300, idealWidth: 420)
+                    }.sidePanel().listPaneWidth()
                     Group {
                         if let id = selected, let r = rows.first(where: { $0.skill.id == id }), let m = masteries[id] {
                             SkillDetail(skill: r.skill, mastery: m, xp: xp[id] ?? XPSummary(xp: 0), courseId: courseId!).id("\(id)-\(model.revision)")

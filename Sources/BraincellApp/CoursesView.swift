@@ -22,7 +22,7 @@ struct CoursesView: View {
                 }
             }
             .sidePanel()
-            .frame(minWidth: 190, idealWidth: 220, maxWidth: 300)
+            .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)   // course picker; narrower than a list pane because a second list sits beside it
             .overlay { if model.courseList.isEmpty { Text("No courses yet").foregroundStyle(Theme.textSecondary) } }
 
             Group {
@@ -164,7 +164,7 @@ struct AssessmentsTab: View {
                     Button { adding = true } label: { Label("Add Assessment", systemImage: "plus") }.padding(Theme.Space.md)
                 }
             }
-            .sidePanel().frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+            .sidePanel().listPaneWidth()
 
             Group {
                 if let a = assessments.first(where: { $0.id == selected }) { scopeEditor(a) }

@@ -38,6 +38,7 @@ struct RootView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .toolbar { FocusToolbarButton() }
+            .navigationTitle(model.settingsOpen ? "Settings" : (model.selection ?? .home).rawValue)
         }
     }
 }
