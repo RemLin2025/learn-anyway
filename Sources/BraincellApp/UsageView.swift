@@ -90,6 +90,8 @@ struct UsageView: View {
             HStack(alignment: .top, spacing: Theme.Space.md) {
                 metric("Total Requests", "\(t.requests)", open: $openRequests)
                 metric("Total Tokens", t.totalTokens.formatted(), open: $openTokens)
+                plainMetric("Estimated cost", t.unknownCostRequests == t.succeeded && t.succeeded > 0 ? "Unknown" : money(t.knownCostMicros, complete: t.costIsComplete), note: t.costIsComplete ? "Estimate, not an invoice" : "\(t.unknownCostRequests) request(s) have no price")
+                plainMetric("Failed", t.requests == 0 ? "—" : "\(t.failed)", note: t.requests == 0 ? "No requests" : String(format: "%.0f%% of requests", Double(t.failed) / Double(t.requests) * 100))
             }
             if openRequests {
                 Card {
@@ -129,6 +131,17 @@ struct UsageView: View {
                 }.frame(maxWidth: .infinity, alignment: .leading)
             }.contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel("\(title): \(value)").accessibilityHint(open.wrappedValue ? "Hides the breakdown" : "Shows the breakdown")
+    }
+
+    /// Same tile as `metric`, for a figure with no breakdown behind it.
+    private func plainMetric(_ title: String, _ value: String, note: String) -> some View {
+        Card(padding: Theme.Space.lg) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.callout).foregroundStyle(Theme.textSecondary)
+                Text(value).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
+                Text(note).font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .combine)
     }
 
     private func stat(_ t: String, _ v: String, note: String? = nil) -> some View {

@@ -3,15 +3,21 @@
 Branch: `ui-redesign`.
 
 ## Done
-| Commit | Change | Verified |
+| Commit | Change | Verified (rendered, dark) |
 |---|---|---|
-| `4365fdb` | Settings > General: left-aligned, own title/subtitle, themed Appearance control, legacy Anthropic card moved last, nav width 212; Model Services capability tabs wrap; Insights empty study-time state and date axis; Home sixth suggestion chip; send button disabled opacity; assessment rows always two lines; AI Tasks helper copy | Built; re-rendered General, Model Services, Insights, Home (dark). Not re-rendered: Provider Plans, Workflow, Usage, light mode |
+| `4365fdb` | Settings General alignment/header/segmented control, nav width, Model Services tabs wrap, Insights empty state + date axis, Home chips, send button, assessment rows, AI Tasks copy | General, Model Services, Insights, Home |
+| `ab8aa32` | Audit, research, design-system, progress docs | n/a |
+| next | Window title follows the screen (HIG); shared `listPaneWidth()` for list panes; audit corrected ("dead title band" was a snapshot artifact) | Courses; title not visible in snapshots (content view only), checked in code |
+| next | `FilterMenu` (themed, replaces AppKit pop-ups) in Question Bank (assessment/skill menus only shown inside a course; cleared when the course changes), Insights, Skills, Usage | Question Bank, Insights, Skills, Usage |
+| this | Usage: four summary tiles (requests, tokens, estimated cost, failed %); Provider Plans and Model Services lists grouped: supported first, "Not supported yet" section | Usage, Provider Plans, Model Services |
+
+Not rendered after the changes: light mode, Skills map, AI Workflow, Library, populated chat, minimum window size.
 
 ## Status of phases
 - Phase 1 audit: done (`docs/ui-ux-audit.md`).
 - Phase 2 research: partial (`docs/ui-research.md`); verified sources are HIG sidebars/toolbars, n8n shortcuts, NN/g empty states. No third-party screenshots.
 - Phase 3 design system: proposal only (`docs/design-system.md`), awaiting approval.
-- Phases 4-6: not started beyond the commit above.
+- Phases 4-6: steps 1 (partly), 2, 3 (Question Bank only), 4, 5 of the plan below are done; 6-8 and the Skills/Library/Home items are open.
 
 ## Proposed implementation plan (awaiting approval)
 1. **Shell and header** (P1 #1-3): `ScreenHeader` component, remove dead title band, one list-pane width token. Touches `RootView`, `DesignSystem`, every screen's top row.
