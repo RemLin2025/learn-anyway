@@ -18,6 +18,8 @@ public struct ValidationResult: Sendable {
     public var issues: [ValidationIssue]
     /// True when a deterministic, independent check confirmed the answer.
     public var computedVerification: Bool
+    /// What was checked and how it came out (schema, consistency, deterministic, unresolved…).
+    public var evidence: [ValidationEvidence] = []
     public var hasBlocking: Bool { issues.contains { $0.severity == .blocking } }
     public var readiness: Readiness {
         if hasBlocking || question == nil { return .invalid }
@@ -85,16 +87,27 @@ public enum QuestionValidator {
         }
         var meta: GenerationMetadata?
         if let m = d["metadata"] as? [String: Any] {
-            meta = GenerationMetadata(generator: m["generator"] as? String, model: m["model"] as? String, requestId: m["requestId"] as? String)
+            var prov: QuestionProvenance?
+            if let pr = m["provenance"], let data = try? JSONSerialization.data(withJSONObject: pr) { prov = try? JSONDecoder().decode(QuestionProvenance.self, from: data) }
+            meta = GenerationMetadata(generator: m["generator"] as? String, model: m["model"] as? String, requestId: m["requestId"] as? String, provenance: prov)
+        }
+        var plan: SolutionPlan?
+        if let sp = d["solutionPlan"] {
+            if let data = try? JSONSerialization.data(withJSONObject: sp), let decoded = try? JSONDecoder().decode(SolutionPlan.self, from: data) {
+                plan = decoded
+                if !decoded.isComplete { c.review("\(root).solutionPlan", "solution plan is incomplete (needs interpretation, method, at least two steps and a final result)") }
+            } else { c.review("\(root).solutionPlan", "solution plan could not be read and was dropped") }
         }
 
         guard !c.issues.contains(where: { $0.severity == .blocking }), let difficulty, let ev, let answer else {
             return ValidationResult(question: nil, issues: c.issues, computedVerification: false)
         }
         let spec = QuestionSpec(type: type, title: title, difficulty: difficulty, learningObjective: objective, content: content,
-                                answer: answer, evaluation: ev, hints: hints, solution: solution, sources: sources, metadata: meta)
+                                answer: answer, evaluation: ev, hints: hints, solution: solution, sources: sources, metadata: meta, solutionPlan: plan)
+        c.evidence.insert(ValidationEvidence(kind: .schema, check: "question structure", result: .passed), at: 0)
+        if c.evidence.allSatisfy({ $0.kind != .deterministic }) { c.evidence.append(ValidationEvidence(kind: .unresolved, check: "mathematical correctness", result: .unsupported, detail: "no deterministic check applies; correctness is not independently confirmed")) }
         return ValidationResult(question: ImportedQuestion(importId: importId, spec: spec, skillNames: skills, assessmentNames: assessments),
-                                issues: c.issues, computedVerification: computed)
+                                issues: c.issues, computedVerification: computed, evidence: c.evidence)
     }
 
     /// Re-validates an already-typed spec (used when a question is edited by hand).
@@ -109,6 +122,7 @@ public enum QuestionValidator {
 
     struct Collector {
         var issues: [ValidationIssue] = []
+        var evidence: [ValidationEvidence] = []
         /// `(1 as NSNumber) is Bool` is true in Swift, so check the underlying CF type instead.
         static func isBool(_ n: NSNumber) -> Bool { CFGetTypeID(n) == CFBooleanGetTypeID() }
         mutating func block(_ p: String, _ m: String) { issues.append(ValidationIssue(path: p, message: m, severity: .blocking)) }
@@ -197,6 +211,34 @@ public enum QuestionValidator {
         }
 
         /// Returns the answer and whether a deterministic independent check confirmed it.
+        /// Interval choices and structured checks. Returns true only when a deterministic recomputation agrees with the marked-correct interval.
+        mutating func verifiedChoice(_ a: inout AnswerSpec, _ d: [String: Any], _ path: String, type: QuestionType) -> Bool {
+            func decode<T: Decodable>(_ key: String, _ t: T.Type) -> T? {
+                guard let raw = d[key], let data = try? JSONSerialization.data(withJSONObject: raw) else { return nil }
+                return try? JSONDecoder().decode(t, from: data)
+            }
+            if d["intervals"] != nil, decode("intervals", [IntervalChoice].self) == nil { block("\(path).intervals", "must be an array of {choiceId, lower, upper, lowerClosed, upperClosed} with null for unbounded"); return false }
+            if d["check"] != nil, decode("check", StructuredCheck.self) == nil { block("\(path).check", "is not a valid structured check"); return false }
+            let intervals = decode("intervals", [IntervalChoice].self), check = decode("check", StructuredCheck.self)
+            a.roundingDecimals = (d["roundingDecimals"] as? NSNumber).map { $0.intValue }
+            a.exactResult = (d["exactResult"] as? NSNumber).map { $0.doubleValue }
+            a.check = check
+            var computed: Double?
+            if let check {
+                let r = MathChecks.run(check); evidence.append(r.evidence); computed = r.computed
+                if r.evidence.result == .failed { block("\(path).check", r.evidence.detail) }
+                if let c = computed, let e = a.exactResult, abs(c - e) > 1e-9 * max(1, abs(c)) { block("\(path).exactResult", "states \(e) but the structured check computes \(c)") }
+                if a.exactResult == nil { a.exactResult = computed }
+            }
+            guard let intervals, type == .singleChoice else { return false }
+            a.intervals = intervals
+            let r = IntervalChecks.validate(choiceIds: (a.choices ?? []).map(\.id), correctId: a.correctIds?.first, intervals: intervals, exactResult: a.exactResult, decimals: a.roundingDecimals, resultIsComputed: computed != nil)
+            for p in r.problems { block("\(path).intervals", p) }
+            evidence += r.evidence
+            // Promote only when the number came from a deterministic recomputation and the correct interval contains it.
+            return r.problems.isEmpty && computed != nil && r.evidence.contains { $0.check == "interval membership" && $0.result == .passed }
+        }
+
         mutating func answer(_ raw: Any?, _ path: String, type: QuestionType, method: EvaluationMethod?) -> (AnswerSpec?, Bool) {
             guard let d = raw as? [String: Any] else { block(path, "is required and must be an object"); return (nil, false) }
             var a = AnswerSpec()
@@ -222,6 +264,7 @@ public enum QuestionValidator {
                 if type == .singleChoice, ids.count != 1 { block("\(path).correctIds", "single_choice needs exactly one correct id"); return (nil, false) }
                 if type == .multipleSelect, ids.count == choices.count { review("\(path).correctIds", "every option is marked correct; check this is intended") }
                 a.choices = choices; a.correctIds = ids
+                if verifiedChoice(&a, d, path, type: type) { verified = true }
             case .shortAnswer, .codeTracing:
                 if method == .symbolic {
                     guard let expr = d["expression"] as? String, !expr.isEmpty, expr.count <= 600 else { block("\(path).expression", "symbolic evaluation needs an expression (≤ 600 characters)"); return (nil, false) }

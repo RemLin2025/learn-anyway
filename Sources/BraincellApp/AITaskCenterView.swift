@@ -381,6 +381,7 @@ struct NewTaskSheet: View {
     @State private var assessments: [Assessment] = []
     @State private var notes = ""
     @State private var includeExisting = true
+    @State private var mode: GenerationMode = .broaderTopics
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -410,6 +411,11 @@ struct NewTaskSheet: View {
                         if docs.isEmpty { Text("No documents imported for this course").foregroundStyle(Theme.textSecondary) }
                         ForEach(docs) { d in Toggle(d.title, isOn: Binding(get: { docIds.contains(d.id) }, set: { if $0 { docIds.insert(d.id) } else { docIds.remove(d.id) } })) }
                     }
+                    Picker("Practice style", selection: $mode) { ForEach(GenerationMode.allCases) { Text($0.title).tag($0) } }
+                    Text(mode == .matchInstructorStyle ? "Follows the reasoning patterns found in analyzed instructor questions. Without analyzed sources this falls back to general practice and says so."
+                         : mode == .similarReasoning ? "Reuses the technique of instructor questions in new scenarios. Needs analyzed instructor questions."
+                         : mode == .weakSkills ? "Targets topics where your measured mastery is lowest. Only topic names are sent, never attempts or scores."
+                         : "Balanced coverage of the in-scope topics with varied reasoning demands.").font(.caption).foregroundStyle(Theme.textSecondary)
                     Toggle("Include existing question titles (avoids duplicates)", isOn: $includeExisting)
                     TextField("Extra guidance (optional)", text: $notes)
                 }.formStyle(.grouped).scrollContentBackground(.hidden)
@@ -437,7 +443,7 @@ struct NewTaskSheet: View {
     private func create() {
         guard let c = courseId else { return }
         let p = GenerationParams(count: count, types: QuestionType.allCases.filter(types.contains), minDifficulty: minD, maxDifficulty: maxD,
-                                 skillIds: Array(skillIds), documentIds: Array(docIds), includeExistingTitles: includeExisting, notes: notes)
+                                 skillIds: Array(skillIds), documentIds: Array(docIds), includeExistingTitles: includeExisting, notes: notes, mode: mode)
         model.perform { if let t = try model.ai?.createGenerationTask(courseId: c, assessmentId: assessmentId, params: p) { onCreate(t.id) } }
         dismiss()
     }

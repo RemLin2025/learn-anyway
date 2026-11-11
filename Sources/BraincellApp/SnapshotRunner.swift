@@ -76,10 +76,17 @@ enum SnapshotRunner {
         }
         let structured = "Suppose \\(X\\) and \\(Y\\) have finite, positive variances \\(\\sigma_X^2\\) and \\(\\sigma_Y^2\\). Define the standardized variables\n\\[U=\\frac{X-\\mathbb{E}[X]}{\\sigma_X}, \\qquad V=\\frac{Y-\\mathbb{E}[Y]}{\\sigma_Y}.\\]\nAssume \\(\\mathbb{E}[UV]=1\\).\n\n**Part A.** Show that \\(\\mathbb{E}[(U-V)^2]=0\\).\n**Part B.** Conclude that \\(Y=aX+b\\) almost surely for some \\(a>0\\), and find \\(a\\) in terms of \\(\\sigma_X\\) and \\(\\sigma_Y\\)."
         let legacy = "Suppose X and Y have finite, positive variances.\nU=(X-E[X])/σ_X\nShow that Corr(X,Y)=1 implies Y is linear in X."
+        let pr4 = "Independent trials each succeed with probability 0.30. Let \\(T\\) be the number of trials through and including the first success. Find \\(\\Pr(T=4)\\)."
         let long = "The sample variance is\n\\[s^2=\\frac{1}{n-1}\\sum_{i=1}^{n}\\left(x_i-\\bar{x}\\right)^2=\\frac{1}{n-1}\\left(\\sum_{i=1}^{n}x_i^2-n\\bar{x}^2\\right)+\\text{an extremely long trailing term that must scroll instead of overflowing the card}\\]\nand for a matrix \\(A\\):\n\\[A=\\begin{pmatrix}1&2\\\\3&4\\end{pmatrix},\\quad \\int_0^1 x^2\\,dx=\\frac13\\]\n\\begin{aligned}a&=b+c\\\\ d&=e\\end{aligned}\nBroken: \\(\\frac{1}{ and a \\(\\unknown{x}\\) span."
-        let ids = [make("Structured", structured), make("Legacy", legacy), make("Long", long)].compactMap { $0 }
+        let ids = [make("Structured", structured), make("Legacy", legacy), make("Long", long), make("Probability", pr4)].compactMap { $0 }
+        CalculatorPanel.shared.toggle(model: model)
+        try? await Task.sleep(nanoseconds: 1_500_000_000)
+        if let v = NSApp.windows.first(where: { $0.title == "Calculator" && $0.isVisible })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) {
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("calculator.png"))
+        } else { NSLog("snapshot: calculator panel not visible") }
+        CalculatorPanel.shared.toggle(model: model)
         model.startPractice(questionIds: ids, title: "Math", courseId: c.id)
-        for (i, n) in ["structured", "legacy", "long"].enumerated() { model.snapshotIndex = i; await shot("math-\(n)-dark") }
+        for (i, n) in ["structured", "legacy", "long", "pr"].enumerated() { model.snapshotIndex = i; await shot("math-\(n)-dark") }
         model.setAppearance(.light)
         for (i, n) in ["structured", "legacy", "long"].enumerated() { model.snapshotIndex = i; await shot("math-\(n)-light") }
     }

@@ -29,7 +29,7 @@ extension AITaskService {
         }
 
         // 3. Envelope checks.
-        guard let version = env["schemaVersion"] as? String, version == QuestionSchema.version else {
+        guard let version = env["schemaVersion"] as? String, QuestionSchema.accepted.contains(version) else {
             let found = env["schemaVersion"] as? String
             try preserve(raw, batchId: targetBatchId, outcome: .rejected, issues: ["Unsupported schemaVersion \(found ?? "(missing)")"])
             throw AITaskError.unsupportedSchema(found)
@@ -68,6 +68,8 @@ extension AITaskService {
             var accepted: [AcceptedQuestion] = [], duplicates: [String] = [], rejected: [RejectedEntry] = []
             var seen = Set<String>()
             var allIssues: [ValidationIssue] = []
+            let excluded = try Self.excludedKeys(d, task)
+            var batchShapes: [(String, Set<String>)] = []
 
             for (i, r) in results.enumerated() {
                 allIssues += r.issues
@@ -76,6 +78,11 @@ extension AITaskService {
                     let title = ((entries[i] as? [String: Any])?["title"] as? String)
                     let id = ((entries[i] as? [String: Any])?["importId"] as? String) ?? "q\(i + 1)"
                     rejected.append(RejectedEntry(index: i, importId: id, title: title, entryJSON: json, issues: r.issues.filter { $0.severity == .blocking }))
+                    continue
+                }
+                if let hit = Self.excludedHit(iq, excluded) {
+                    let json = (try? JSONSerialization.data(withJSONObject: entries[i], options: [.sortedKeys, .prettyPrinted])).flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+                    rejected.append(RejectedEntry(index: i, importId: iq.importId, title: iq.spec.title, entryJSON: json, issues: [ValidationIssue(path: "questions[\(i)].skills", message: "covers the excluded topic “\(hit)”", severity: .blocking)]))
                     continue
                 }
                 let hash = QuestionHashing.contentHash(iq.spec)
@@ -92,6 +99,9 @@ extension AITaskService {
                       AND lower(r.title) = lower(?) LIMIT 1
                     """, arguments: [task.courseId, iq.spec.type, iq.spec.title.trimmingCharacters(in: .whitespaces)])
                 if let probable { notes.append("Probable duplicate of existing question “\(probable)”") }
+                let shape = QuestionHashing.shingles(iq.spec)
+                if let near = try Self.nearDuplicate(d, courseId: task.courseId, spec: iq.spec, shape: shape, batch: batchShapes) { notes.append("Near-duplicate of “\(near)”: same construction with little more than different numbers") }
+                batchShapes.append((iq.spec.title, shape))
 
                 let (skillIds, skillNotes) = try Self.resolveSkills(d, courseId: task.courseId, names: iq.skillNames)
                 notes += skillNotes
@@ -100,6 +110,7 @@ extension AITaskService {
 
                 let q = try QuestionService.insert(d, courseId: task.courseId, spec: iq.spec, validation: r, skillIds: skillIds,
                                                    assessmentIds: asmIds, origin: .aiImport, aiImportId: importId, familyId: nil, extraNotes: notes)
+                try Self.persistProvenance(d, question: q, spec: iq.spec, evidence: r.evidence, task: task)
                 accepted.append(AcceptedQuestion(importId: iq.importId, questionId: q.id, title: iq.spec.title, readiness: q.readiness))
             }
 
@@ -123,6 +134,50 @@ extension AITaskService {
             }
             return ImportReport(importId: importId, batchId: batch.id, alreadyImported: false, accepted: accepted,
                                 duplicates: duplicates, rejected: rejected, batchStatus: status)
+        }
+    }
+
+    // MARK: Reasoning metadata
+
+    static func excludedKeys(_ d: Database, _ task: AITask) throws -> [String] {
+        guard let a = task.assessmentId, let json = try String.fetchOne(d, sql: "SELECT configJSON FROM assessment_config WHERE assessmentId = ?", arguments: [a]),
+              let cfg = try? JSONDecoder().decode(AssessmentConfig.self, from: Data(json.utf8)) else { return [] }
+        return cfg.scopeExcludes.map(\.skillKey)
+    }
+
+    /// A generated question that names an excluded topic (as a skill or its provenance topic) is rejected, whatever the sources say.
+    static func excludedHit(_ q: ImportedQuestion, _ keys: [String]) -> String? {
+        guard !keys.isEmpty else { return nil }
+        let names = q.skillNames + [q.spec.metadata?.provenance?.topic].compactMap { $0 }
+        return names.first { n in keys.contains { n.skillKey == $0 || n.skillKey.hasPrefix($0) } }
+    }
+
+    static func nearDuplicate(_ d: Database, courseId: UUID, spec: QuestionSpec, shape: Set<String>, batch: [(String, Set<String>)]) throws -> String? {
+        if let hit = batch.first(where: { QuestionHashing.similarity(shape, $0.1) >= QuestionHashing.nearDuplicateThreshold }) { return hit.0 }
+        let rows = try Row.fetchAll(d, sql: "SELECT r.title, r.payload FROM question_revisions r JOIN questions q ON q.id = r.questionId WHERE q.courseId = ? AND q.archivedAt IS NULL AND q.type = ? AND r.id = q.currentRevisionId ORDER BY q.createdAt DESC LIMIT 300", arguments: [courseId, spec.type])
+        for row in rows {
+            guard let other = try? JSONDecoder().decode(QuestionSpec.self, from: Data((row["payload"] as String).utf8)) else { continue }
+            if QuestionHashing.similarity(shape, QuestionHashing.shingles(other)) >= QuestionHashing.nearDuplicateThreshold { return row["title"] }
+        }
+        return nil
+    }
+
+    /// Provenance, reasoning-skill links and validation evidence for an accepted question. Slots are matched against the task's plan.
+    static func persistProvenance(_ d: Database, question q: Question, spec: QuestionSpec, evidence: [ValidationEvidence], task: AITask) throws {
+        if let prov = spec.metadata?.provenance {
+            let plan = try GenerationPlanStore.load(d, taskId: task.id)
+            let slot = plan?.slots.contains { $0.id == prov.slotId } == true ? prov.slotId : nil
+            try d.execute(sql: "INSERT OR REPLACE INTO question_provenance (questionId, revisionId, planId, slotId, mode, primaryArchetype, topic, origin, createdAt) VALUES (?,?,?,?,?,?,?,?,?)",
+                           arguments: [q.id, q.currentRevisionId, plan == nil ? nil : task.id.uuidString, slot, (prov.mode ?? plan?.mode)?.rawValue, prov.primaryArchetype, prov.topic, prov.origin, Date()])
+            let topicId = try prov.topic.flatMap { try SourceAnalysisService.topicSkill(d, courseId: task.courseId, name: $0) }
+            for name in prov.reasoningSkills where !name.trimmingCharacters(in: .whitespaces).isEmpty {
+                let rid = try ReasoningStore.ensure(d, courseId: task.courseId, name: name, topicSkillId: topicId)
+                try d.execute(sql: "INSERT OR IGNORE INTO question_reasoning_skills (questionId, reasoningSkillId) VALUES (?,?)", arguments: [q.id, rid])
+            }
+        }
+        for e in evidence {
+            try d.execute(sql: "INSERT INTO question_evidence (id, questionId, revisionId, kind, checkName, inputs, result, detail, createdAt) VALUES (?,?,?,?,?,?,?,?,?)",
+                           arguments: [UUID(), q.id, q.currentRevisionId, e.kind.rawValue, e.check, e.inputs, e.result.rawValue, e.detail, Date()])
         }
     }
 

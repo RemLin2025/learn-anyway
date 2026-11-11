@@ -680,6 +680,139 @@ public final class AppDatabase: Sendable {
             }
             try db.create(index: "study_prep_jobs_on_course", on: "study_prep_jobs", columns: ["courseId", "updatedAt"])
         }
+        m.registerMigration("v17_reasoning_assessment") { db in
+            // Reasoning layer, additive: topics stay in `skills`; nothing existing is rewritten.
+            try db.create(table: "archetypes") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).references("courses", onDelete: .cascade)      // NULL = built in
+                t.column("key", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("builtin", .boolean).notNull().defaults(to: false)
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(index: "archetypes_on_course_key", on: "archetypes", columns: ["courseId", "key"])
+            for a in Archetype.allCases {
+                try db.execute(sql: "INSERT INTO archetypes (id, courseId, key, name, builtin, createdAt) VALUES (?, NULL, ?, ?, 1, ?)", arguments: [UUID(), a.rawValue, a.title, Date()])
+            }
+            try db.create(table: "reasoning_skills") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("topicSkillId", .blob).references("skills", onDelete: .setNull)   // the topic it belongs to
+                t.column("key", .text).notNull()
+                t.column("name", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["courseId", "key"])
+            }
+            try db.create(table: "source_analyses") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("documentId", .blob).notNull().references("documents", onDelete: .cascade)
+                t.column("documentSha", .text).notNull()            // content identity the analysis was made from
+                t.column("analyzerVersion", .text).notNull()
+                t.column("configHash", .text).notNull()
+                t.column("status", .text).notNull()                 // pending | awaitingImport | partial | complete | failed | stale
+                t.column("windowsTotal", .integer).notNull()
+                t.column("windowsDone", .integer).notNull().defaults(to: 0)
+                t.column("limitations", .text).notNull().defaults(to: "")
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+                t.uniqueKey(["documentId", "documentSha", "analyzerVersion", "configHash"])
+            }
+            try db.create(table: "source_analysis_windows") { t in
+                t.primaryKey("id", .blob)
+                t.column("analysisId", .blob).notNull().references("source_analyses", onDelete: .cascade)
+                t.column("ordinal", .integer).notNull()
+                t.column("chunkFrom", .integer).notNull()
+                t.column("chunkTo", .integer).notNull()
+                t.column("requestId", .text).notNull()
+                t.column("requestText", .text).notNull()
+                t.column("status", .text).notNull()                 // pending | awaitingImport | done | failed
+                t.column("rawResponse", .text)
+                t.column("error", .text)
+                t.uniqueKey(["analysisId", "ordinal"])
+            }
+            try db.create(table: "source_questions") { t in
+                t.primaryKey("id", .blob)
+                t.column("analysisId", .blob).notNull().references("source_analyses", onDelete: .cascade)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("documentId", .blob).notNull().references("documents", onDelete: .cascade)
+                t.column("locator", .text).notNull()
+                t.column("primaryArchetype", .text)
+                t.column("difficulty", .integer)
+                t.column("completeness", .text).notNull()           // complete | partial
+                t.column("payload", .text).notNull()                // SourceQuestionPayload JSON (original material kept apart from generated variants)
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["analysisId", "locator"])
+            }
+            try db.create(index: "source_questions_on_course", on: "source_questions", columns: ["courseId", "primaryArchetype"])
+            try db.create(table: "source_question_reasoning") { t in
+                t.column("sourceQuestionId", .blob).notNull().references("source_questions", onDelete: .cascade)
+                t.column("reasoningSkillId", .blob).notNull().references("reasoning_skills", onDelete: .cascade)
+                t.primaryKey(["sourceQuestionId", "reasoningSkillId"])
+            }
+            try db.create(table: "style_profiles") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .cascade)
+                t.column("profileJSON", .text).notNull()
+                t.column("fingerprint", .text).notNull()            // hash of the analyses + config it was built from
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "assessment_config") { t in
+                t.primaryKey("assessmentId", .blob).references("assessments", onDelete: .cascade)
+                t.column("configJSON", .text).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "generation_plans") { t in
+                t.primaryKey("taskId", .blob).references("ai_tasks", onDelete: .cascade)
+                t.column("mode", .text).notNull()
+                t.column("planJSON", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(table: "question_provenance") { t in
+                t.primaryKey("questionId", .blob).references("questions", onDelete: .cascade)
+                t.column("revisionId", .blob).notNull().references("question_revisions", onDelete: .restrict)
+                t.column("planId", .text)
+                t.column("slotId", .text)
+                t.column("mode", .text)
+                t.column("primaryArchetype", .text)
+                t.column("topic", .text)
+                t.column("origin", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(index: "question_provenance_on_plan", on: "question_provenance", columns: ["planId", "slotId"])
+            try db.create(table: "question_reasoning_skills") { t in
+                t.column("questionId", .blob).notNull().references("questions", onDelete: .cascade)
+                t.column("reasoningSkillId", .blob).notNull().references("reasoning_skills", onDelete: .cascade)
+                t.primaryKey(["questionId", "reasoningSkillId"])
+            }
+            try db.create(table: "question_evidence") { t in
+                t.primaryKey("id", .blob)
+                t.column("questionId", .blob).notNull().references("questions", onDelete: .cascade)
+                t.column("revisionId", .blob).notNull().references("question_revisions", onDelete: .restrict)
+                t.column("kind", .text).notNull()
+                t.column("checkName", .text).notNull()
+                t.column("inputs", .text).notNull()
+                t.column("result", .text).notNull()
+                t.column("detail", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(index: "question_evidence_on_question", on: "question_evidence", columns: ["questionId"])
+            try db.create(table: "exam_attempts") { t in
+                t.primaryKey("id", .blob)
+                t.column("sessionId", .blob).notNull().unique().references("study_sessions", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .setNull)
+                t.column("durationSeconds", .integer).notNull()
+                t.column("pointsPerQuestion", .double).notNull()
+                t.column("startedAt", .datetime).notNull()
+                t.column("pausedAt", .datetime)
+                t.column("pausedSeconds", .integer).notNull().defaults(to: 0)
+                t.column("status", .text).notNull()                 // active | paused | submitted | expired
+                t.column("submittedAt", .datetime)
+                t.column("score", .double)
+                t.column("maxScore", .double)
+            }
+        }
         return m
     }
 

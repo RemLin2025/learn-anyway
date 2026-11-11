@@ -56,7 +56,7 @@ extension AgentRegistry {
             return ToolOutput(text: "Moved \(ids.count) file(s) into \(course.name). They are now in both Materials and Library.", summary: "Attached \(ids.count) file(s)", chips: [ActionChip(label: "Open \(course.name)", action: "openCourse", courseId: course.id)])
         },
         ToolSpec(name: "questions.generate", summary: "Draft practice questions from the course's readable materials with the configured model. Nothing is saved until the learner approves the preview.",
-                 params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "Assessment name (optional)"), ToolParam("count", "integer", "1–30"), ToolParam("minDifficulty", "integer", "1–5"), ToolParam("maxDifficulty", "integer", "1–5"), ToolParam("notes", "string", "Focus or style notes")], permission: .write, approval: true,
+                 params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "Assessment name (optional)"), ToolParam("count", "integer", "1–30"), ToolParam("minDifficulty", "integer", "1–5"), ToolParam("maxDifficulty", "integer", "1–5"), ToolParam("notes", "string", "Focus or style notes"), ToolParam("mode", "string", "matchInstructorStyle | similarReasoning | broaderTopics | weakSkills (default broaderTopics)")], permission: .write, approval: true,
                  describe: { a, c in
                      let p = (try? c.gateway.resolve(WorkflowTask.find("quizGeneration")!))?.primary?.connection
                      let where_ = p == nil ? "the configured model" : (p!.spec?.isLocal == true ? "\(p!.name) (stays on this Mac)" : "\(p!.name) (excerpts of your course materials are sent there and may be billed)")
@@ -96,7 +96,7 @@ extension AgentRegistry {
             if !weighted.isEmpty { notes += "\nInstructor-stated priorities: " + weighted.joined(separator: ", ") + ". Do not invent other weights." }
             notes = String(notes.prefix(6000))
         }
-        let params = GenerationParams(count: min(30, max(1, a.int("count") ?? 10)), minDifficulty: lo, maxDifficulty: hi, documentIds: docIds, notes: notes)
+        let params = GenerationParams(count: min(30, max(1, a.int("count") ?? 10)), minDifficulty: lo, maxDifficulty: hi, documentIds: docIds, notes: notes, mode: a.string("mode").flatMap(GenerationMode.init(rawValue:)))
         let task = try c.ai.createGenerationTask(courseId: course.id, assessmentId: asm?.id, params: params)
         var result = GenerationResult(courseId: course.id, batches: [], items: [])
         for b in try c.ai.batches(taskId: task.id) {

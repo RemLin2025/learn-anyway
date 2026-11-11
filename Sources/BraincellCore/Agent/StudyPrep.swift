@@ -236,7 +236,7 @@ public enum StudyPrep {
                 if !cited.isEmpty { docIds = Array((readable.filter { cited.contains($0.id) } + readable.filter { !cited.contains($0.id) }).prefix(12).map(\.id)) }
             }
             let count = min(30, max(10, s.topicCount * 2))
-            let t = try c.ai.createGenerationTask(courseId: course.id, assessmentId: asm?.id, params: GenerationParams(count: count, skillIds: s.skillIds, documentIds: docIds, notes: String(notes.prefix(6000))))
+            let t = try c.ai.createGenerationTask(courseId: course.id, assessmentId: asm?.id, params: GenerationParams(count: count, skillIds: s.skillIds, documentIds: docIds, notes: String(notes.prefix(6000)), mode: .matchInstructorStyle))
             s.taskId = t.id; try save(&job, s, c)
         }
         for b in try c.ai.batches(taskId: s.taskId!) where !s.doneBatches.contains(b.id) {
