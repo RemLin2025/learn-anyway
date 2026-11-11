@@ -52,6 +52,7 @@ struct PracticeView: View {
                     .accessibilityLabel("Progress").accessibilityValue("\(pm.items.filter { $0.status == .submitted }.count) of \(pm.items.count) submitted")
             }
             FocusChip()
+            if pm.spec?.isMathy == true { Button { CalculatorPanel.shared.toggle(model: app) } label: { Image(systemName: "plusminus.circle") }.help("Calculator (floating window)").accessibilityLabel("Calculator") }
             Text(pm.examActive ? "\(Self.clock(pm.examRemaining)) left" : Self.clock(pm.seconds)).font(.system(.callout, design: .rounded)).monospacedDigit().foregroundStyle(pm.examActive && pm.examRemaining < 300 ? Theme.attention : Theme.textSecondary).help(pm.examActive ? "Exam time remaining" : "Active time on this question")
                 .accessibilityLabel("Active time \(pm.seconds / 60) minutes \(pm.seconds % 60) seconds")
             Button { pm.togglePause() } label: { Image(systemName: pm.paused ? "play.fill" : "pause.fill") }

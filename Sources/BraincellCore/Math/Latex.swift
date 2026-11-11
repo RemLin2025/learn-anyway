@@ -229,6 +229,7 @@ public enum Latex {
                 return .delimited(open, inner, try delimiter())
             case "begin": return try environment()
             case "displaystyle", "textstyle", "limits", "nolimits": return .space
+            case "Pr": return .text("P")                                  // probability, shown as an upright P (as in P(T=4))
             case "big", "Big", "bigg", "Bigg", "bigl", "bigr", "Bigl", "Bigr", "biggl", "biggr", "Biggl", "Biggr", "middle":
                 let d = try delimiter(); return d.isEmpty ? .space : .symbol(d)
             case "boldsymbol", "bm", "boldmath": return try atom(depth: depth + 1)
