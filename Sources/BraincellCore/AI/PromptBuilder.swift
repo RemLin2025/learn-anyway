@@ -29,9 +29,20 @@ public struct RequestManifest: Codable, Sendable, Equatable {
     public var includedResponses: Int? = nil
     public var characterCount: Int
     public var recommendedTransfer: TransferMethod
+    /// Generation planning: the mode, how many planned slots this request covers, and the local list of weaker topic names (names only).
+    public var mode: String? = nil
+    public var blueprintSlots: Int? = nil
+    public var weakTopicTargets: [String]? = nil
+    public var excludedTopics: [String]? = nil
     /// Fixed statements about what is *not* shared.
     public var excluded: [String]
 
+    /// Disclosure when weak-topic names are included: still no attempts, answers or scores, but the topic names are derived from them.
+    public static let excludedStatementsWithWeakTopics = [
+        "No attempt history, answers or scores (only the names of your weaker topics, derived on this Mac)",
+        "No private reflections or learning-history notes",
+        "No files other than the document extracts listed above",
+    ]
     public static let excludedStatements = [
         "No attempt history, answers or scores",
         "No private reflections or learning-history notes",
@@ -66,6 +77,11 @@ struct PromptInput {
     var batchLabel: String
     var repair: [RepairItem] = []
     var alreadyHave: [String] = []
+    var blueprint: String = ""
+    var blueprintSlots = 0
+    var mode: String?
+    var weakTargets: [String] = []
+    var excludedTopics: [String] = []
 }
 
 enum PromptBuilder {
@@ -95,6 +111,7 @@ enum PromptBuilder {
         }.joined(separator: "\n\n")
 
         var parts = [instructions, "## Response JSON schema\n```json\n\(ResponseSchema.json)\n```", skills]
+        if !i.blueprint.isEmpty { parts.append(i.blueprint) }
         if !existing.isEmpty { parts.append(existing) }
         if !repair.isEmpty { parts.append(repair) }
         parts += docSections.map(\.1)
@@ -108,11 +125,14 @@ enum PromptBuilder {
             documents: order.map { t in .init(title: t, characters: byDoc[t]!.reduce(0) { $0 + $1.text.count }, truncated: i.truncatedDocs.contains(t)) },
             existingQuestionTitles: i.existingTitles.count, repairEntries: i.repair.count,
             includesUserNotes: !i.params.notes.trimmingCharacters(in: .whitespaces).isEmpty,
-            characterCount: single.count, recommendedTransfer: transfer, excluded: RequestManifest.excludedStatements)
+            characterCount: single.count, recommendedTransfer: transfer, mode: i.mode, blueprintSlots: i.blueprintSlots == 0 ? nil : i.blueprintSlots,
+            weakTopicTargets: i.weakTargets.isEmpty ? nil : i.weakTargets, excludedTopics: i.excludedTopics.isEmpty ? nil : i.excludedTopics,
+            excluded: i.weakTargets.isEmpty ? RequestManifest.excludedStatements : RequestManifest.excludedStatementsWithWeakTopics)
 
         var files = [ExportFile(name: "instructions.md", content: instructions),
                      ExportFile(name: "response_schema.json", content: ResponseSchema.json),
                      ExportFile(name: "context_skills.md", content: skills)]
+        if !i.blueprint.isEmpty { files.append(ExportFile(name: "context_blueprint.md", content: i.blueprint)) }
         if !existing.isEmpty { files.append(ExportFile(name: "context_existing_questions.md", content: existing)) }
         if !repair.isEmpty { files.append(ExportFile(name: "context_repair.md", content: repair)) }
         for (n, (t, body)) in docSections.enumerated() { files.append(ExportFile(name: "source_\(n + 1)_\(safeName(t)).md", content: body)) }
@@ -174,6 +194,12 @@ enum PromptBuilder {
         - coding (preferred): answer {"language":"python|c|java","starterCode":"…","referenceSolution":"…","tests":[{"name":"small case","input":"stdin text","expectedOutput":"exact stdout","hidden":false}]}; evaluation {"method":"code_tests"}. The program reads stdin and writes stdout; give 3–8 tests (some `hidden`: true); the referenceSolution MUST pass every test; it is checked automatically.
         - coding (when stdin/stdout tests don't fit): same answer without tests; evaluation {"method":"self_review"} or {"method":"ai_rubric","rubric":[…]}
         - long_form / derivation_proof: answer {}; evaluation {"method":"ai_rubric","rubric":[{"criterion":"…","points":2}]}; put the model answer in `solution`
+
+        ## Reasoning metadata (schema v2, all optional but strongly preferred)
+        - `solutionPlan`: {"interpretation","assumptions":[],"method","formulas":[],"steps":[{"description","skill","intermediateResult","commonError"}],"finalResult","pitfalls":[]} — an explicit, checkable solution a teacher could follow (not hidden reasoning). At least two steps.
+        - `metadata.provenance`: {"slotId":"<slot id from the Blueprint>","topic","reasoningSkills":["verb phrase"],"primaryArchetype":"<archetype key>","secondaryArchetypes":[],"origin":"generated_variant","sourceRefs":[{"document","page","locator"}],"difficultyFactors":{"steps":0-3,"concepts":0-3,"methodSelection":0-3,"assumptions":0-3,"algebra":0-3,"conditioning":0-3,"generalization":0-3,"misconceptions":0-3,"rationale":""}}. Difficulty is an estimate from these factors; long wording or unpleasant arithmetic does not make a question harder.
+        - Numeric single_choice with interval choices: add to `answer` `"intervals":[{"choiceId":"a","lower":0.1,"upper":0.2,"lowerClosed":true,"upperClosed":false}]` (null = unbounded; never use Infinity), `"exactResult"` (the unrounded number) and `"roundingDecimals"`. For supported problems add `"check"` so the app recomputes the result: {"kind":"jointPMF","op":"conditionalYgivenX","xs":[…],"ys":[…],"table":[[…]],"x":1,"y":2} or {"kind":"geometricMGF","op":"mgf|domainUpper|mean|variance","p":0.3,"t":0.1} or {"kind":"finitePMF","probs":[…]}.
+        - Distractors must come from plausible misconceptions. A formula-recall question and a derivation question are different reasoning demands; label them honestly.
 
         Request ID: \(i.requestId)
         """

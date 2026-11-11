@@ -73,7 +73,7 @@ final class Script: @unchecked Sendable {
     @Test func registryDescribesEverythingAndGatesWrites() {
         let all = AgentRegistry.all()
         #expect(Set(all.map(\.name)).count == all.count)
-        for t in all { #expect(!t.summary.isEmpty); if t.permission != .read && !["studyPlans.create", "studyMap.create", "exam.prepare"].contains(t.name) { #expect(t.requiresApproval, "\(t.name) must need approval") } }
+        for t in all { #expect(!t.summary.isEmpty); if t.permission != .read && !["studyPlans.create", "studyMap.create", "exam.prepare", "sources.analyze"].contains(t.name) { #expect(t.requiresApproval, "\(t.name) must need approval") } }
         #expect(AgentRegistry.spec("courses.delete")?.permission == .destructive && AgentRegistry.spec("courses.list")?.requiresApproval == false)
     }
 

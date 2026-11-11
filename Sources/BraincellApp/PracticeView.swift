@@ -52,14 +52,14 @@ struct PracticeView: View {
                     .accessibilityLabel("Progress").accessibilityValue("\(pm.items.filter { $0.status == .submitted }.count) of \(pm.items.count) submitted")
             }
             FocusChip()
-            Text(Self.clock(pm.seconds)).font(.system(.callout, design: .rounded)).monospacedDigit().foregroundStyle(Theme.textSecondary).help("Active time on this question")
+            Text(pm.examActive ? "\(Self.clock(pm.examRemaining)) left" : Self.clock(pm.seconds)).font(.system(.callout, design: .rounded)).monospacedDigit().foregroundStyle(pm.examActive && pm.examRemaining < 300 ? Theme.attention : Theme.textSecondary).help(pm.examActive ? "Exam time remaining" : "Active time on this question")
                 .accessibilityLabel("Active time \(pm.seconds / 60) minutes \(pm.seconds % 60) seconds")
             Button { pm.togglePause() } label: { Image(systemName: pm.paused ? "play.fill" : "pause.fill") }
                 .help(pm.paused ? "Resume" : "Pause the timer").accessibilityLabel(pm.paused ? "Resume" : "Pause")
             if pm.layout == .workspace {
                 Button { showCoach.toggle() } label: { Image(systemName: "sidebar.right") }.help("Show or hide help").accessibilityLabel("Toggle help panel")
             }
-            Button("Finish") { pm.finish() }.help("End the session and see a summary")
+            Button(pm.examActive ? "Submit Exam" : "Finish") { pm.finish() }.help(pm.examActive ? "Submit all saved answers and see your score" : "End the session and see a summary")
         }
         .padding(.horizontal, Theme.Space.xl).padding(.vertical, Theme.Space.md).background(Theme.surface)
     }
@@ -69,7 +69,9 @@ struct PracticeView: View {
             Button { pm.go(-1) } label: { Label("Previous", systemImage: "arrow.left") }.disabled(pm.index == 0).keyboardShortcut("[", modifiers: .command)
             Button { pm.go(1) } label: { Label("Next", systemImage: "arrow.right") }.disabled(pm.isLast).keyboardShortcut("]", modifiers: .command)
             Spacer()
-            if !pm.locked {
+            if !pm.locked && pm.examActive {
+                Button(pm.isLast ? "Save answer" : "Save & Next") { pm.submit() }.buttonStyle(.primary).keyboardShortcut(.return, modifiers: .command).disabled(pm.response.isEmpty)
+            } else if !pm.locked {
                 Menu("Stuck?") { ForEach(StuckKind.allCases) { k in Button(k.label) { stuck = k } } }.menuStyle(.borderlessButton).fixedSize()
                     .help("Get unstuck with prepared hints, related skills, or a help request you can send to ChatGPT yourself")
                 Button("Hint (\(pm.hintsUsed)/\(spec.hints.count))") { pm.revealHint() }
@@ -110,7 +112,7 @@ struct PracticeView: View {
                 }
                 AnswerView(spec: spec, response: $pm.response, locked: pm.locked, fontSize: CGFloat(app.codeFontSize), pm: pm, onSubmit: pm.submit)
                 ConfidenceRow(pm: pm)
-                hints(spec)
+                if !pm.examActive { hints(spec) }
                 if pm.locked { GradePanel(pm: pm, spec: spec); CoachBanner(pm: pm); ReferencePanel(spec: spec, response: pm.response, fontSize: CGFloat(app.codeFontSize)) }
             }
             .padding(32).frame(maxWidth: 740, alignment: .leading).frame(maxWidth: .infinity)
@@ -130,7 +132,7 @@ struct PracticeView: View {
                     if pm.locked { GradePanel(pm: pm, spec: spec); CoachBanner(pm: pm); ReferencePanel(spec: spec, response: pm.response, fontSize: CGFloat(app.codeFontSize)) }
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(minWidth: 340, idealWidth: 520)
-            if showCoach {
+            if showCoach && !pm.examActive {
                 ScrollView { VStack(alignment: .leading, spacing: 14) { coach(spec) }.padding(16).frame(maxWidth: .infinity, alignment: .leading) }
                     .frame(minWidth: 200, idealWidth: 240, maxWidth: 320).background(Theme.surface)
             }

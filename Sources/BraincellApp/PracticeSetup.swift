@@ -19,6 +19,8 @@ struct PracticeSetupSheet: View {
     @State private var available: [PracticeCandidate] = []
     @State private var timed = false
     @State private var assessments: [Assessment] = []
+    @State private var examCount = 19
+    @State private var examMinutes = 75
 
     private var course: Course? { model.courseList.first { $0.id == request.courseId } }
     private var presentTypes: [QuestionType] { QuestionType.allCases.filter { t in available.contains { $0.type == t } } }
@@ -34,7 +36,14 @@ struct PracticeSetupSheet: View {
                 Stepper("Questions: \(count)", value: $count, in: 1...60)
                 Picker("Difficulty", selection: $difficulty) { ForEach(PracticeDifficulty.allCases) { Text($0.rawValue).tag($0) } }.frame(maxWidth: 170)
             }
-            if kind == .exam { Toggle("Timed (no coaching nudges)", isOn: $timed) }
+            if kind == .exam {
+                if assessmentId != nil {
+                    HStack {
+                        Stepper("Questions: \(examCount)", value: $examCount, in: 1...100); Stepper("Minutes: \(examMinutes)", value: $examMinutes, in: 5...240, step: 5)
+                    }
+                    Text("Answers are saved as you go. Feedback, solutions and your score appear only after you submit. These settings are saved as yours, not confirmed from the instructor.").font(.caption).foregroundStyle(Theme.textSecondary)
+                } else { Text("Pick an assessment to run a full exam simulation; without one this is a simple timed set.").font(.caption).foregroundStyle(Theme.textSecondary); Toggle("Timed (no coaching nudges)", isOn: $timed) }
+            }
             if !presentTypes.isEmpty {
                 Text("Question types").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
                 HStack { ForEach(presentTypes, id: \.self) { t in Toggle(t.label, isOn: Binding(get: { types.contains(t) }, set: { if $0 { types.insert(t) } else { types.remove(t) } })).toggleStyle(.button).controlSize(.small) } }
@@ -53,6 +62,7 @@ struct PracticeSetupSheet: View {
         .padding(Theme.Space.xl).frame(width: 600, height: 560).background(Theme.background)
         .onAppear { assessmentId = request.assessmentId; topics = request.skillIds; if !request.skillIds.isEmpty { kind = .topic }; load() }
         .onChange(of: assessmentId) { _, _ in load() }
+        .onChange(of: kind) { _, _ in load() }
     }
 
     private var chosenSkills: Set<UUID> { kind == .exam ? [] : topics }
@@ -62,7 +72,8 @@ struct PracticeSetupSheet: View {
         guard let cs = model.courses, let st = model.agentStore, let pr = model.practice else { return }
         assessments = (try? cs.assessments(courseId: request.courseId)) ?? []
         rows = (try? cs.topicRows(courseId: request.courseId, assessmentId: assessmentId, store: st))?.filter { $0.inScope } ?? []
-        available = (try? pr.candidates(courseId: request.courseId, assessmentId: assessmentId)) ?? []
+        available = (try? pr.candidates(courseId: request.courseId, assessmentId: kind == .exam ? nil : assessmentId)) ?? []
+        if let a = assessmentId, let db = model.db, let cfg = try? AssessmentService(db: db).config(assessmentId: a) { examCount = cfg.examQuestionCount ?? examCount; examMinutes = cfg.durationMinutes ?? examMinutes }
     }
 
     private func start() {
@@ -71,6 +82,16 @@ struct PracticeSetupSheet: View {
         })
         let ids = PracticeSelector.select(available, count: count, skills: chosenSkills, weights: kind == .topic ? [:] : weights, difficulty: difficulty, types: types)
         let title = [course?.name, assessments.first { $0.id == assessmentId }?.name, kind.rawValue].compactMap { $0 }.joined(separator: " · ")
+        if kind == .exam, let a = assessmentId, let db = model.db {
+            model.perform {
+                let svc = AssessmentService(db: db); var cfg = try svc.config(assessmentId: a)
+                cfg.examQuestionCount = examCount; cfg.durationMinutes = examMinutes; cfg.pointsPerQuestion = cfg.pointsPerQuestion ?? 1; cfg.format = cfg.format ?? "single_choice"
+                cfg.basis["examQuestionCount"] = .userProvided; cfg.basis["durationMinutes"] = .userProvided
+                try svc.setConfig(cfg, assessmentId: a)
+                model.activeSessionID = try ExamService(db: db).start(courseId: request.courseId, assessmentId: a, title: title).sessionId
+            }
+            dismiss(); return
+        }
         model.perform {
             if kind == .exam { model.activeSessionID = try model.practice?.start(planned: ids.map { .init(questionId: $0, kind: .practice, reason: "Exam practice") }, title: title, courseId: request.courseId, assessmentId: assessmentId, mode: .free, timed: timed).id }
             else { model.activeSessionID = try model.practice?.start(questionIds: ids, title: title, courseId: request.courseId, assessmentId: assessmentId).id }

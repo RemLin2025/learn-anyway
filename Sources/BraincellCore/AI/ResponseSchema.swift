@@ -11,7 +11,7 @@ public enum ResponseSchema {
       "required": ["schemaVersion", "requestId", "questions"],
       "additionalProperties": false,
       "properties": {
-        "schemaVersion": { "const": "cramlab.questions.v1" },
+        "schemaVersion": { "enum": ["cramlab.questions.v2", "cramlab.questions.v1"] },
         "requestId": { "type": "string", "description": "Copy EXACTLY from the request." },
         "questions": { "type": "array", "maxItems": 50, "items": { "$ref": "#/definitions/question" } }
       },
@@ -56,7 +56,8 @@ public enum ResponseSchema {
             "assessments": { "type": "array", "items": { "type": "string" } },
             "sources": { "type": "array", "items": { "type": "object", "properties": {
               "document": { "type": "string" }, "page": { "type": "integer" }, "note": { "type": "string" } } } },
-            "metadata": { "type": "object" }
+            "metadata": { "type": "object", "description": "generator, model, requestId and provenance {slotId, topic, reasoningSkills, primaryArchetype, secondaryArchetypes, origin, sourceRefs, difficultyFactors}" },
+            "solutionPlan": { "type": "object", "description": "interpretation, assumptions[], method, formulas[], steps[{description, skill, intermediateResult, commonError}], finalResult, pitfalls[]" }
           }
         }
       }

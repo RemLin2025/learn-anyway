@@ -3,7 +3,9 @@ import GRDB
 
 /// Provider-independent question schema, version 1. Stored as the immutable payload of a question revision.
 public enum QuestionSchema {
-    public static let version = "cramlab.questions.v1"
+    /// v2 = v1 plus optional reasoning metadata, solution plans, intervals and structured checks. v1 responses and payloads stay valid.
+    public static let version = "cramlab.questions.v2"
+    public static let accepted: Set<String> = ["cramlab.questions.v1", "cramlab.questions.v2"]
 }
 
 public enum QuestionType: String, Codable, Sendable, CaseIterable, DatabaseValueConvertible {
@@ -119,11 +121,20 @@ public struct AnswerSpec: Codable, Hashable, Sendable {
     public var referenceSolution: String?
     /// coding + `code_tests`: the program reads stdin and writes stdout.
     public var tests: [CodeTest]?
+    /// Choice questions with numeric intervals: structured bounds per choice (the displayed text is not parsed for math).
+    public var intervals: [IntervalChoice]?
+    /// The underlying numeric result the intervals are checked against, and the rounding the question requires.
+    public var exactResult: Double?
+    public var roundingDecimals: Int?
+    /// A structured problem the app can recompute deterministically (see `MathChecks`).
+    public var check: StructuredCheck?
 
     public init(back: [ContentBlock]? = nil, choices: [Choice]? = nil, correctIds: [String]? = nil,
                 accepted: [String]? = nil, caseSensitive: Bool? = nil, expression: String? = nil, value: Double? = nil, tolerance: Double? = nil,
                 unit: String? = nil, verificationExpression: String? = nil, expectedOutput: String? = nil,
-                language: String? = nil, starterCode: String? = nil, referenceSolution: String? = nil, tests: [CodeTest]? = nil) {
+                language: String? = nil, starterCode: String? = nil, referenceSolution: String? = nil, tests: [CodeTest]? = nil,
+                intervals: [IntervalChoice]? = nil, exactResult: Double? = nil, roundingDecimals: Int? = nil, check: StructuredCheck? = nil) {
+        self.intervals = intervals; self.exactResult = exactResult; self.roundingDecimals = roundingDecimals; self.check = check
         self.back = back; self.choices = choices; self.correctIds = correctIds; self.accepted = accepted
         self.caseSensitive = caseSensitive; self.expression = expression; self.value = value; self.tolerance = tolerance; self.unit = unit
         self.verificationExpression = verificationExpression; self.expectedOutput = expectedOutput
@@ -148,8 +159,9 @@ public struct GenerationMetadata: Codable, Hashable, Sendable {
     public var generator: String?
     public var model: String?
     public var requestId: String?
-    public init(generator: String? = nil, model: String? = nil, requestId: String? = nil) {
-        self.generator = generator; self.model = model; self.requestId = requestId
+    public var provenance: QuestionProvenance?
+    public init(generator: String? = nil, model: String? = nil, requestId: String? = nil, provenance: QuestionProvenance? = nil) {
+        self.generator = generator; self.model = model; self.requestId = requestId; self.provenance = provenance
     }
 }
 
@@ -166,10 +178,13 @@ public struct QuestionSpec: Codable, Hashable, Sendable {
     public var solution: [ContentBlock]
     public var sources: [SourceRef]
     public var metadata: GenerationMetadata?
+    /// Structured educational solution (interpretation, method, steps…); separate from the student-visible question.
+    public var solutionPlan: SolutionPlan?
 
     public init(type: QuestionType, title: String, difficulty: Int, learningObjective: String, content: [ContentBlock],
                 answer: AnswerSpec, evaluation: EvaluationSpec, hints: [String] = [], solution: [ContentBlock] = [],
-                sources: [SourceRef] = [], metadata: GenerationMetadata? = nil) {
+                sources: [SourceRef] = [], metadata: GenerationMetadata? = nil, solutionPlan: SolutionPlan? = nil) {
+        self.solutionPlan = solutionPlan
         self.type = type; self.title = title; self.difficulty = difficulty; self.learningObjective = learningObjective
         self.content = content; self.answer = answer; self.evaluation = evaluation; self.hints = hints
         self.solution = solution; self.sources = sources; self.metadata = metadata

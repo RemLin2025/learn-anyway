@@ -10,6 +10,10 @@ final class PracticeModel: ObservableObject {
     let evalSvc: EvaluationService
     let progSvc: ProgressionService
     let sessionID: UUID
+    let exams: ExamService
+    /// Exam simulation: answers are saved as drafts only; no feedback, hints or score until the exam is submitted.
+    @Published var exam: ExamAttempt?
+    @Published var examRemaining = 0
 
     @Published var session: StudySession?
     @Published var items: [SessionItem] = []
@@ -40,9 +44,11 @@ final class PracticeModel: ObservableObject {
         self.svc = app.practice ?? PracticeService(db: app.db!)
         self.evalSvc = app.evaluation ?? EvaluationService(db: app.db!)
         self.progSvc = app.progression ?? ProgressionService(db: app.db!)
+        self.exams = ExamService(db: app.db!)
         load()
     }
 
+    var examActive: Bool { exam.map { $0.status != "submitted" } ?? false }
     var item: SessionItem? { items.indices.contains(index) ? items[index] : nil }
     var spec: QuestionSpec? { item.flatMap { specs[$0.id] } }
     var locked: Bool { attempt != nil }
@@ -56,6 +62,8 @@ final class PracticeModel: ObservableObject {
         do {
             let s = try svc.session(sessionID)
             session = s
+            exam = try exams.attempt(sessionId: sessionID)
+            if let e = exam { examRemaining = exams.remainingSeconds(e) }
             items = try svc.items(sessionId: sessionID)
             for it in items { specs[it.id] = try svc.spec(for: it) }
             paused = s.status == .paused
@@ -105,6 +113,10 @@ final class PracticeModel: ObservableObject {
     }
 
     func tick(active: Bool) {
+        if examActive, let e = exam {
+            examRemaining = exams.remainingSeconds(e)
+            if examRemaining == 0, !paused { app.alertMessage = "Time is up. Your saved answers were submitted."; finish(); return }
+        }
         guard active, !paused, attempt == nil, summary == nil else { return }
         seconds += 1; pendingSeconds += 1
         if pendingSeconds >= 10 { flush() }
@@ -113,6 +125,7 @@ final class PracticeModel: ObservableObject {
     func togglePause() {
         flush()
         paused.toggle()
+        if let e = exam, examActive { if paused { try? exams.pause(e.id) } else { try? exams.resume(e.id) }; exam = try? exams.attempt(e.id) }
         try? svc.setStatus(sessionID, paused ? .paused : .active)
     }
 
@@ -121,7 +134,7 @@ final class PracticeModel: ObservableObject {
     func go(_ delta: Int) { flush(); enter(index + delta) }
 
     func revealHint() {
-        guard let it = item, let s = spec, hintsUsed < s.hints.count, !locked else { return }
+        guard let it = item, let s = spec, hintsUsed < s.hints.count, !locked, !examActive else { return }
         flush()
         do { try svc.revealHint(itemId: it.id, level: hintsUsed + 1); items = try svc.items(sessionId: sessionID) } catch { fail(error) }
     }
@@ -129,6 +142,7 @@ final class PracticeModel: ObservableObject {
     func submit() {
         guard let it = item, !locked else { return }
         flush()
+        if examActive { if !isLast { enter(index + 1) }; return }          // exam: the answer is saved, never graded or revealed here
         do {
             attempt = try svc.submit(itemId: it.id, response: response)
             result = try attempt.map { try evalSvc.evaluate(attemptId: $0.id) }
@@ -201,6 +215,7 @@ final class PracticeModel: ObservableObject {
 
     func finish() {
         flush()
+        if let e = exam, examActive { do { exam = try exams.submit(e.id); items = try svc.items(sessionId: sessionID) } catch { fail(error); return } }
         do { try svc.setStatus(sessionID, .completed); summary = try progSvc.sessionResults(sessionId: sessionID); session = try svc.session(sessionID) } catch { fail(error) }
     }
 

@@ -269,6 +269,7 @@ struct TopicsTab: View {
     @State private var renaming: Skill?
     @State private var renameText = ""
     @State private var sourcesFor: TopicRow?
+    @State private var showProfile = false
 
     /// Rows after search, importance filter and collapsed parents (a collapsed parent hides everything deeper until the next sibling).
     private var visible: [TopicRow] {
@@ -292,6 +293,7 @@ struct TopicsTab: View {
                 TextField("Search topics", text: $search).frame(maxWidth: 200).accessibilityLabel("Search topics")
                 Spacer()
                 Button { model.practiceSetup = PracticeSetupRequest(courseId: course.id, assessmentId: assessmentId) } label: { Label("Practice", systemImage: "play.fill") }.buttonStyle(.primary).disabled(rows.allSatisfy { $0.questionCount == 0 })
+                Button("Style profile") { showProfile = true }.help("What was detected about the instructor's question style, with confidence and limitations")
                 Button("Analyze with Chat") { model.chat?.analyzeTopics(course: course, assessment: assessments.first { $0.id == assessmentId }) }.help("Re-run topic analysis and question generation in Chat. Your edits are kept; new topics are added.")
             }.padding([.horizontal, .top], 16)
             HStack {
@@ -311,6 +313,7 @@ struct TopicsTab: View {
             }
         }
         .task(id: "\(model.revision)-\(assessmentId?.uuidString ?? "")") { load() }
+        .sheet(isPresented: $showProfile) { StyleProfileSheet(courseId: course.id, assessment: assessments.first { $0.id == assessmentId }) }
         .sheet(item: $renaming) { s in
             NameSheet(title: "Rename Topic", prompt: "Name", text: $renameText, confirm: "Rename") {
                 model.perform { try model.courses?.renameSkill(s.id, to: renameText) }

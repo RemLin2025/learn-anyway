@@ -10,8 +10,11 @@ public struct GenerationParams: Codable, Sendable, Equatable {
     public var documentIds: [UUID]
     public var includeExistingTitles: Bool
     public var notes: String
+    /// Planning mode (nil = Broader Topic Practice). Decoding old params without it works.
+    public var mode: GenerationMode?
     public init(count: Int = 10, types: [QuestionType] = [], minDifficulty: Int = 1, maxDifficulty: Int = 5,
-                skillIds: [UUID] = [], documentIds: [UUID] = [], includeExistingTitles: Bool = true, notes: String = "") {
+                skillIds: [UUID] = [], documentIds: [UUID] = [], includeExistingTitles: Bool = true, notes: String = "", mode: GenerationMode? = nil) {
+        self.mode = mode
         self.count = count; self.types = types; self.minDifficulty = minDifficulty; self.maxDifficulty = maxDifficulty
         self.skillIds = skillIds; self.documentIds = documentIds; self.includeExistingTitles = includeExistingTitles; self.notes = notes
     }
@@ -97,8 +100,38 @@ public struct AITaskService: Sendable {
     // MARK: Creating tasks
 
     /// Splits `params.count` into batches of at most 10 questions, each with its own request ID.
+    /// Creates a generation task and its shared plan. Scope exclusions are enforced here, so AI Tasks and Home chat get the same behavior.
     @discardableResult
     public func createGenerationTask(courseId: UUID, assessmentId: UUID? = nil, params: GenerationParams) throws -> AITask {
+        var p = params
+        let scope = try AssessmentService(db: db).scope(courseId: courseId, assessmentId: assessmentId, requested: p.skillIds, tasks: self)
+        if !p.skillIds.isEmpty || !scope.limitations.isEmpty { p.skillIds = scope.skillIds }       // narrowing only; the default path below is unchanged
+        let task = try insertGenerationTask(courseId: courseId, assessmentId: assessmentId, params: p)
+        try buildPlan(task: task, scope: scope)
+        return task
+    }
+
+    func buildPlan(task: AITask, scope: AssessmentService.Scope) throws {
+        let params = self.params(of: task)
+        let skills = try db.read { d in try Skill.fetchAll(d, keys: params.skillIds).filter { $0.archivedAt == nil } }
+        let counts: [UUID: Int] = try db.read { d in
+            Dictionary(uniqueKeysWithValues: try Row.fetchAll(d, sql: "SELECT skillId, COUNT(*) c FROM question_skills qs JOIN questions q ON q.id = qs.questionId WHERE q.archivedAt IS NULL AND q.courseId = ? GROUP BY skillId", arguments: [task.courseId]).map { ($0["skillId"] as UUID, $0["c"] as Int) })
+        }
+        let mode = params.mode ?? .broaderTopics
+        let weak = mode == .weakSkills ? Set(try GenerationPlanStore.weakTopicNames(db: db, courseId: task.courseId).map { $0.skillKey }) : []
+        let docs = params.documentIds.isEmpty ? nil : Set(params.documentIds)
+        let sources = try SourceAnalysisService(db: db, gateway: nil).sourceQuestions(courseId: task.courseId, documentIds: docs)
+        let svc = AssessmentService(db: db)
+        let profile = (mode == .matchInstructorStyle || mode == .similarReasoning) ? try svc.profile(courseId: task.courseId, assessmentId: task.assessmentId) : nil
+        let cfg = try task.assessmentId.map { try svc.config(assessmentId: $0) } ?? AssessmentConfig()
+        var plan = GenerationPlanner.plan(mode: mode, count: params.count, topics: skills.map { .init(name: $0.name, existingCount: counts[$0.id] ?? 0, weak: weak.contains($0.normalizedName)) },
+                                          sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames)
+        plan.limitations += scope.limitations
+        try GenerationPlanStore(db: db).save(plan, taskId: task.id)
+    }
+
+    @discardableResult
+    func insertGenerationTask(courseId: UUID, assessmentId: UUID?, params: GenerationParams) throws -> AITask {
         guard (1...200).contains(params.count) else { throw AITaskError.invalidParams("Ask for between 1 and 200 questions.") }
         guard 1 <= params.minDifficulty, params.minDifficulty <= params.maxDifficulty, params.maxDifficulty <= 5 else {
             throw AITaskError.invalidParams("Difficulty must be within 1–5.")
@@ -132,6 +165,19 @@ public struct AITaskService: Sendable {
             return try UUID.fetchAll(d, sql: "SELECT skillId FROM course_skills JOIN skills ON skills.id = skillId WHERE courseId = ? AND archivedAt IS NULL", arguments: [a.courseId])
         }
         return try UUID.fetchAll(d, sql: "SELECT skillId FROM assessment_skills JOIN skills ON skills.id = skillId WHERE assessmentId = ? AND archivedAt IS NULL", arguments: [a.id])
+    }
+
+    static func blueprintText(_ plan: GenerationPlan, _ slots: [PlanSlot]) -> String {
+        var t = "## Blueprint\nMode: \(plan.mode.title). Write exactly one question per slot and put the slot id in `metadata.provenance.slotId`.\n"
+        t += "Originality: each question must change the substantive construction, context or reasoning application of any example. Swapping numbers or names is not enough. Never copy instructor text.\n"
+        for s in slots {
+            t += "- Slot \(s.id): topic “\(s.topic)”; archetype \(s.archetype); difficulty \(s.difficulty); format \(s.format)" + (s.reasoningSkill.map { "; reasoning skill: \($0)" } ?? "") + ". \(s.rationale)\n"
+            if let e = s.exemplars.first { t += "    Technique to transfer (from \(e.document ?? "source")\(e.page.map { ", p.\($0)" } ?? "") \(e.locator ?? "")): \(s.exemplarSummary ?? "see source extract")\n" }
+        }
+        if !plan.excludedTopics.isEmpty { t += "Excluded topics (never write questions on or require these): " + plan.excludedTopics.joined(separator: ", ") + "\n" }
+        if !plan.weakTargets.isEmpty { t += "The learner is weaker on these topics (names only): " + plan.weakTargets.joined(separator: ", ") + "\n" }
+        for l in plan.limitations { t += "Note: \(l)\n" }
+        return t
     }
 
     static func newBatch(_ d: Database, taskId: UUID, parent: UUID?, ordinal: Int, kind: BatchKind, expected: Int) -> AITaskBatch {
@@ -181,23 +227,27 @@ public struct AITaskService: Sendable {
                     WHERE q.courseId = ? AND q.archivedAt IS NULL ORDER BY q.createdAt DESC LIMIT ?
                     """, arguments: [task.courseId, PromptBuilder.maxExistingTitles])
             }
-            var extracts: [PromptInput.Extract] = [], truncated: Set<String> = []
-            var budget = PromptBuilder.extractBudget
+            // Planned slots for this request (generate: its slice of the task-wide plan; continue: the first unmet slots).
+            let plan = try GenerationPlanStore.load(d, taskId: task.id)
+            var slots: [PlanSlot] = []
+            if let plan, b.kind == .generate {
+                let start = try Int.fetchOne(d, sql: "SELECT COALESCE(SUM(expectedCount), 0) FROM ai_task_batches WHERE taskId = ? AND kind = 'generate' AND ordinal < ?", arguments: [b.taskId, b.ordinal]) ?? 0
+                slots = Array(plan.slots.dropFirst(start).prefix(b.expectedCount))
+            } else if plan != nil, b.kind == .continue { slots = Array(try GenerationPlanStore.unmet(d, taskId: task.id).prefix(b.expectedCount)) }
+            var docsForExtract: [(title: String, chunks: [DocumentChunk])] = []
             for docId in params.documentIds {
                 guard let doc = try Document.fetchOne(d, key: docId), doc.courseId == task.courseId else { continue }
-                for c in try DocumentChunk.filter(Column("documentId") == docId && Column("isLowContent") == false).order(Column("ordinal")).fetchAll(d) {
-                    guard budget > 0 else { truncated.insert(doc.title); break }
-                    let text = String(c.text.prefix(budget))
-                    if text.count < c.text.count { truncated.insert(doc.title) }
-                    extracts.append(.init(title: doc.title, page: c.pageNumber, text: text)); budget -= text.count
-                }
+                docsForExtract.append((doc.title, try DocumentChunk.filter(Column("documentId") == docId && Column("isLowContent") == false).order(Column("ordinal")).fetchAll(d)))
             }
+            let selected = ExtractSelector.select(docsForExtract, queries: slots.map(\.topic) + skills + [assessment?.name ?? ""], budget: PromptBuilder.extractBudget)
+            let extracts = selected.extracts, truncated = selected.truncated
 
             var input = PromptInput(kind: b.kind, requestId: b.requestId, count: b.expectedCount, params: params,
                                     courseName: course.name, assessmentName: assessment?.name, skills: skills,
                                     existingTitles: existing, extracts: extracts, truncatedDocs: truncated,
                                     batchLabel: "")
             let siblings = try AITaskBatch.filter(Column("taskId") == b.taskId && Column("kind") == BatchKind.generate).fetchCount(d)
+            if let plan, !slots.isEmpty { input.blueprint = Self.blueprintText(plan, slots); input.blueprintSlots = slots.count; input.mode = plan.mode.rawValue; input.weakTargets = plan.weakTargets; input.excludedTopics = plan.excludedTopics }
             input.batchLabel = b.kind == .generate ? "batch \(b.ordinal + 1) of \(siblings)" : "\(b.kind.rawValue) request"
 
             if b.kind == .repair, let parent = b.parentBatchId, let imp = try Self.latestImport(d, batchId: parent) {

@@ -185,3 +185,13 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - Chats: search, edit (archives the old branch, restorable), regenerate, auto title (deterministic fallback, one model title, never over a rename), interrupted-work recovery on launch (migration v15).
 - Exam workflow tools: `sources.status`, `sources.search` (ranked across all documents, with page provenance and coverage gaps), `studyMap.create/get` (verified source refs; instructor weight needs a quote found in the material; estimates carry no percentage; research rejected because no web tool exists).
 - Stages shown are real tool/workflow steps. No streaming, no OCR/vision, no web research, no independent answer verification (questions stay "Unverified").
+
+## Reasoning-aware practice generation (migration v17)
+
+- **Source analysis** (`Assessment/SourceAnalysis.swift`): instructor practice questions and worked solutions are extracted in overlapping windows, cached by document content + analyzer version, resumable, and flagged partial/complete with extraction limitations. Manual-bridge routes pause as `awaitingImport`. No OCR: scanned pages are reported, not analyzed.
+- **Style profile** (`Assessment/StyleProfile.swift`): inferred patterns (with confidence and references) are kept apart from user-provided exam settings; counts are never used as exam topic weights.
+- **Planner** (`Assessment/GenerationPlanner.swift`): one plan per generation task (four modes), sliced per batch, tracked by slot across imports/continuations. Used by AI Tasks and Home chat via `AITaskService.createGenerationTask`.
+- **Scope**: `assessment_config` includes/excludes are enforced at task creation and again at import.
+- **Validation** (`Assessment/MathChecks.swift`): interval choices, structured checks (finite/joint PMF, geometric MGF), evidence rows. Schema v2 adds optional fields; v1 stays valid.
+- **Exam simulation** (`Practice/ExamService.swift`): persisted selection, exam-wide clock, deferred feedback, idempotent submission.
+- Not done: OCR, DOCX/PPTX, a general CAS, guided step-by-step work submission, per-step diagnosis.
