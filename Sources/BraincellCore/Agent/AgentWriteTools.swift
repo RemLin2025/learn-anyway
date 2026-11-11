@@ -83,14 +83,29 @@ extension AgentRegistry {
         let skills = try c.courses.skills(courseId: course.id)
         guard !readable.isEmpty || !skills.isEmpty else { throw ToolError.unavailable("\(course.name) has no readable materials and no topics, so there is nothing to base questions on. Ask the learner to add lecture notes or a syllabus first.") }
         let lo = min(5, max(1, a.int("minDifficulty") ?? 1)), hi = min(5, max(lo, a.int("maxDifficulty") ?? 5))
-        let params = GenerationParams(count: min(30, max(1, a.int("count") ?? 10)), minDifficulty: lo, maxDifficulty: hi, documentIds: readable.prefix(12).map(\.id), notes: a.string("notes") ?? "")
+        var notes = a.string("notes") ?? "", docIds = readable.prefix(12).map(\.id)
+        // A saved study map steers generation: its cited documents come first, and each example's structure and extra step are required to carry over.
+        if let d = (try c.store.maps(courseId: course.id, conversationId: info.conversationId).first ?? c.store.maps(courseId: course.id).first)?.document {
+            let cited = Set(d.topics.flatMap(\.sources).map(\.documentId) + d.structures.map(\.source.documentId))
+            if !cited.isEmpty { docIds = Array((readable.filter { cited.contains($0.id) } + readable.filter { !cited.contains($0.id) }).prefix(12).map(\.id)) }
+            if !d.structures.isEmpty {
+                notes += "\n\nSOURCE PROBLEM STRUCTURES (from the learner's own material). Each new question must be ORIGINAL and keep the learning objective, solution structure, constraints, difficulty and the distinguishing extra step of one of these, changing the context, givens and numbers (not a reworded copy). Include progressive hints and a worked solution, and name the source example it mirrors:\n"
+                notes += d.structures.prefix(12).map { "- \($0.family) [\($0.source.documentName)\($0.source.page.map { " p.\($0)" } ?? "")]: objective \($0.objective); givens \($0.givens.joined(separator: ", ")); unknowns \($0.unknowns.joined(separator: ", ")); method \($0.method); EXTRA STEP: \($0.extraStep); common mistakes: \($0.commonMistakes.joined(separator: ", "))" }.joined(separator: "\n")
+            }
+            let weighted = d.topics.filter { $0.importance.source == .instructor }.map { "\($0.name) (\($0.importance.level)\($0.importance.weightPercent.map { " \(Int($0))%" } ?? ""))" }
+            if !weighted.isEmpty { notes += "\nInstructor-stated priorities: " + weighted.joined(separator: ", ") + ". Do not invent other weights." }
+            notes = String(notes.prefix(6000))
+        }
+        let params = GenerationParams(count: min(30, max(1, a.int("count") ?? 10)), minDifficulty: lo, maxDifficulty: hi, documentIds: docIds, notes: notes)
         let task = try c.ai.createGenerationTask(courseId: course.id, assessmentId: asm?.id, params: params)
         var result = GenerationResult(courseId: course.id, batches: [], items: [])
         for b in try c.ai.batches(taskId: task.id) {
             try Task.checkCancellation()
             let pkg = try c.ai.prepare(batchId: b.id)
+            info.stage("Generating practice")
             let out = try await c.gateway.complete(task: WorkflowTask.find("quizGeneration")!, prompt: pkg.singlePrompt, courseId: course.id)
             result.batches.append(.init(batchId: b.id, raw: out.text))
+            info.stage("Validating results")
             guard let env = AITaskService.parse(out.text) as? [String: Any], let entries = env["questions"] as? [Any] else {
                 result.items.append(.init(title: "Reply for batch \(b.ordinal + 1) wasn’t valid question JSON", type: "-", difficulty: 0, valid: false, issue: "Unreadable reply; it will not be saved.")); continue
             }
@@ -103,7 +118,7 @@ extension AgentRegistry {
         let enc = String(data: try JSONEncoder().encode(result), encoding: .utf8) ?? "{}"
         try c.store.setStatus(info.actionId, .running, result: enc)
         let ok = result.items.filter(\.valid).count
-        return ToolOutput(text: "Drafted \(result.items.count) question(s); \(ok) valid, \(result.items.count - ok) rejected by validation. NOTHING is saved yet. The learner sees a preview with Save/Discard buttons. generationId=\(info.actionId.uuidString)\n" + result.items.prefix(30).map { "- \($0.title) [\($0.type), d\($0.difficulty)]\($0.valid ? "" : " REJECTED: \($0.issue ?? "")")" }.joined(separator: "\n"),
+        return ToolOutput(text: "Drafted \(result.items.count) question(s); \(ok) valid, \(result.items.count - ok) rejected by validation. Validation was STRUCTURAL (schema, required fields); the answers were NOT independently verified, so say so and don’t call them verified. NOTHING is saved yet. The learner sees a preview with Save/Discard buttons. generationId=\(info.actionId.uuidString)\n" + result.items.prefix(30).map { "- \($0.title) [\($0.type), d\($0.difficulty)]\($0.valid ? "" : " REJECTED: \($0.issue ?? "")")" }.joined(separator: "\n"),
                           summary: "\(ok) question(s) drafted", generationId: info.actionId)
     }
 
@@ -120,7 +135,7 @@ extension AgentRegistry {
         let summary = "Saved \(accepted) question(s) to the Question Bank\(dup > 0 ? ", skipped \(dup) duplicate(s)" : "")\(rejected > 0 ? ", \(rejected) rejected by validation" : ""). They are marked Unverified until reviewed."
         g.saved = true; g.savedSummary = summary
         try c.store.setStatus(generationId, .succeeded, result: String(data: try JSONEncoder().encode(g), encoding: .utf8))
-        return ToolOutput(text: summary, summary: "Saved \(accepted) question(s)", chips: [ActionChip(label: "Open Question Bank", action: "openQuestionBank"), ActionChip(label: "Practice", action: "startPractice", courseId: g.courseId)])
+        return ToolOutput(text: summary, summary: "Saved \(accepted) question(s)", chips: [ActionChip(label: "Open Question Bank", action: "openQuestionBank", courseId: g.courseId), ActionChip(label: "Practice", action: "startPractice", courseId: g.courseId)])
     }
 
     // MARK: Study plan

@@ -15,18 +15,24 @@ struct AIPlansView: View {
     private var spec: ProviderSpec { ProviderRegistry.spec(selected) ?? ProviderRegistry.planProviders[0] }
     private var conn: AIConnection? { cfg.connections(for: selected).first }
 
+    private func planRow(_ p: ProviderSpec) -> some View {
+        HStack(spacing: Theme.Space.md) {
+            ProviderIcon(symbol: p.symbol)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(p.name).font(.system(.body, design: .rounded, weight: .medium))
+                let c = cfg.connections(for: p.id).first
+                Text(!p.isImplemented ? "Not supported yet" : (c?.status.label ?? "Not connected")).font(Theme.meta).foregroundStyle(c?.status.color ?? Theme.textSecondary)
+            }
+        }.padding(.vertical, 3).tag(p.id).accessibilityElement(children: .combine)
+    }
+
     var body: some View {
         AIPage(title: "AI Provider Plans", subtitle: "Pick a provider and enter one key. Connected providers appear in Model Services automatically.") {
             HStack(alignment: .top, spacing: 0) {
-                List(ProviderRegistry.planProviders, selection: Binding(get: { selected }, set: { if let v = $0 { selected = v; key = ""; baseURL = "" } })) { p in
-                    HStack(spacing: Theme.Space.md) {
-                        ProviderIcon(symbol: p.symbol)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(p.name).font(.system(.body, design: .rounded, weight: .medium))
-                            let c = cfg.connections(for: p.id).first
-                            Text(!p.isImplemented ? "Not supported yet" : (c?.status.label ?? "Not connected")).font(Theme.meta).foregroundStyle(c?.status.color ?? Theme.textSecondary)
-                        }
-                    }.padding(.vertical, 3).tag(p.id).accessibilityElement(children: .combine)
+                List(selection: Binding(get: { selected }, set: { if let v = $0 { selected = v; key = ""; baseURL = "" } })) {
+                    Section { ForEach(ProviderRegistry.planProviders.filter { $0.isImplemented }) { planRow($0) } }
+                    let unsupported = ProviderRegistry.planProviders.filter { !$0.isImplemented }
+                    if !unsupported.isEmpty { Section("Not supported yet") { ForEach(unsupported) { planRow($0) } } }
                 }.sidePanel().frame(width: 220)
                 ScrollView { detail.padding(Theme.Space.xl).frame(maxWidth: 680, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
             }

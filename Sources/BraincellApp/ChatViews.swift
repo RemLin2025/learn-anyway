@@ -5,17 +5,27 @@ import BraincellCore
 struct ChatWorkspace: View {
     @ObservedObject var chat: ChatModel
     @EnvironmentObject var model: AppModel
-    @State private var showHistory = false
+    @AppStorage("chatPanelOpen") private var panelOpen = true
+    @State private var width: CGFloat = 1000
+    private var showPanel: Bool { panelOpen && width >= 760 }        // the history panel steps aside in narrow windows
     @State private var renaming: ChatConversation?
     @State private var renameText = ""
     @State private var deleting: ChatConversation?
     @State private var targeted = false
 
     var body: some View {
-        VStack(spacing: 0) {
-            header
-            if chat.isEmpty { emptyState } else { transcript; Composer(chat: chat, compact: true).frame(maxWidth: 760).padding(.horizontal, Theme.Space.lg).padding(.bottom, Theme.Space.md) }
+        HStack(spacing: 0) {
+            if showPanel {
+                ChatHistoryPanel(chat: chat, rename: { renameText = $0.title; renaming = $0 }, delete: { deleting = $0 })
+                    .frame(width: 252).background(Theme.surface)
+                    .overlay(alignment: .trailing) { Rectangle().fill(Theme.border).frame(width: 1) }
+            }
+            VStack(spacing: 0) {
+                header
+                if chat.isEmpty { emptyState } else { transcript; Composer(chat: chat, compact: true).frame(maxWidth: 760).padding(.horizontal, Theme.Space.lg).padding(.bottom, Theme.Space.md) }
+            }
         }
+        .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { width = $0 }
         .dropDestination(for: URL.self, action: { urls, _ in chat.attachFiles(urls); return true }, isTargeted: { targeted = $0 })
         .overlay { if targeted { RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.accent, style: StrokeStyle(lineWidth: 2, dash: [6])).background(Theme.accent.opacity(0.06)).padding(8).allowsHitTesting(false) } }
         .sheet(item: $renaming) { c in NameSheet(title: "Rename Conversation", prompt: "Title", text: $renameText, confirm: "Rename") { chat.rename(c.id, renameText) } }
@@ -29,53 +39,33 @@ struct ChatWorkspace: View {
 
     private var header: some View {
         HStack(spacing: Theme.Space.md) {
-            Image(systemName: "brain.head.profile").font(.system(size: 16, weight: .semibold)).foregroundStyle(Theme.accent).frame(width: 32, height: 32)
-                .background(Theme.accent.opacity(0.14), in: RoundedRectangle(cornerRadius: 9)).accessibilityHidden(true)
-            Text(chat.isEmpty ? "Learn Anyway" : (chat.currentId.flatMap { id in chat.conversations.first { $0.id == id }?.title } ?? "Chat")).font(.system(.title3, design: .rounded, weight: .semibold)).lineLimit(1)
+            Button { panelOpen.toggle() } label: { Image(systemName: "sidebar.left").frame(width: 32, height: 32).contentShape(Rectangle()) }.buttonStyle(.plain)
+                .foregroundStyle(Theme.textSecondary).help(showPanel ? "Hide conversations" : "Show conversations").accessibilityLabel(showPanel ? "Hide conversations" : "Show conversations")
+            Text(chat.isEmpty ? "New chat" : (chat.currentId.flatMap { id in chat.conversations.first { $0.id == id }?.title } ?? "Chat")).font(.system(.headline, design: .rounded, weight: .semibold)).lineLimit(1)
             Spacer()
-            Button { showHistory.toggle() } label: { Image(systemName: "clock.arrow.circlepath") }.buttonStyle(.plain).help("Conversation history").accessibilityLabel("Conversation history")
-                .popover(isPresented: $showHistory, arrowEdge: .bottom) { history }
-            Button { chat.newChat() } label: { Image(systemName: "square.and.pencil") }.buttonStyle(.plain).help("New chat (⌘N)").accessibilityLabel("New chat").keyboardShortcut("n", modifiers: [.command, .shift])
-        }.padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md)
-    }
-
-    private var history: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Text("Conversations").font(Theme.cardTitle).padding(Theme.Space.md)
-            Divider()
-            if chat.conversations.isEmpty { Text("No conversations yet.").foregroundStyle(Theme.textSecondary).padding(Theme.Space.lg) }
-            else {
-                ScrollView {
-                    LazyVStack(spacing: 2) {
-                        ForEach(chat.conversations) { c in
-                            Button { chat.open(c.id); showHistory = false } label: {
-                                HStack { VStack(alignment: .leading, spacing: 2) { Text(c.title).lineLimit(1).font(.system(.body, design: .rounded, weight: c.id == chat.currentId ? .semibold : .regular))
-                                    Text(c.updatedAt.formatted(date: .abbreviated, time: .shortened)).font(Theme.meta).foregroundStyle(Theme.textSecondary) }; Spacer() }
-                                    .padding(.horizontal, Theme.Space.md).padding(.vertical, 6).contentShape(Rectangle())
-                                    .background(c.id == chat.currentId ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
-                            }.buttonStyle(.plain)
-                            .contextMenu { Button("Rename…") { renameText = c.title; renaming = c; showHistory = false }; Button("Delete…", role: .destructive) { deleting = c; showHistory = false } }
-                        }
-                    }.padding(Theme.Space.sm)
-                }.frame(maxHeight: 340)
-            }
-        }.frame(width: 320)
+            if !showPanel { Button { chat.newChat() } label: { Label("New chat", systemImage: "square.and.pencil").labelStyle(.iconOnly).frame(width: 32, height: 32).contentShape(Rectangle()) }.buttonStyle(.plain).foregroundStyle(Theme.textSecondary).help("New chat").accessibilityLabel("New chat") }
+        }.padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm).frame(minHeight: 48)
+            .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }
     }
 
     // MARK: Empty state
 
     private var emptyState: some View {
-        VStack(spacing: Theme.Space.lg) {
+        VStack(spacing: Theme.Space.xl) {
             Spacer(minLength: Theme.Space.xl)
-            VStack(spacing: Theme.Space.sm) {
-                Text("What would you like to learn today?").font(.system(size: 28, weight: .semibold, design: .rounded)).multilineTextAlignment(.center)
-                Text("Your AI study assistant, connected to your courses and materials.").foregroundStyle(Theme.textSecondary).multilineTextAlignment(.center)
-            }
+            VStack(spacing: Theme.Space.xs) {
+                Text(Self.greeting).font(.system(.title3, design: .rounded, weight: .medium)).foregroundStyle(Theme.textSecondary)
+                (Text("What would you like to ").foregroundStyle(Theme.textPrimary) + Text("learn today?").foregroundStyle(Theme.accent))
+                    .font(.system(size: 30, weight: .semibold, design: .rounded)).multilineTextAlignment(.center)
+            }.accessibilityElement(children: .combine)
             Composer(chat: chat, compact: false).frame(maxWidth: 720)
             SuggestionGrid(chat: chat).frame(maxWidth: 720)
-            Text("Suggested prompts · Connected to your learning workspace").font(Theme.meta).foregroundStyle(Theme.textSecondary)
             Spacer(minLength: Theme.Space.xl)
         }.padding(.horizontal, Theme.Space.xl).frame(maxWidth: .infinity)
+    }
+    private static var greeting: String {
+        let h = Calendar.current.component(.hour, from: Date())
+        return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
     }
 
     // MARK: Transcript
@@ -85,7 +75,8 @@ struct ChatWorkspace: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: Theme.Space.md) {
                     ForEach(chat.messages) { m in MessageRow(chat: chat, message: m).id(m.id) }
-                    if chat.thinking { ThinkingRow().id("thinking") }
+                    if chat.canRegenerate { Button { chat.regenerate() } label: { Label("Regenerate response", systemImage: "arrow.clockwise").font(Theme.meta).padding(.vertical, 4).contentShape(Rectangle()) }.buttonStyle(.plain).foregroundStyle(Theme.textSecondary).help("Answer the last message again. The earlier reply is kept, not deleted.") }
+                    if chat.thinking { ThinkingRow(stage: chat.stage).id("thinking") }
                 }.frame(maxWidth: 760, alignment: .leading).padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.md).frame(maxWidth: .infinity)
             }
             .onChange(of: chat.messages.count) { _, _ in withAnimation(.easeOut(duration: 0.15)) { if chat.thinking { proxy.scrollTo("thinking", anchor: .bottom) } else if let last = chat.messages.last?.id { proxy.scrollTo(last, anchor: .bottom) } } }
@@ -106,21 +97,69 @@ struct SuggestionGrid: View {
         S(id: "explain", symbol: "book", title: "Explain a concept", prompt: "Teach me a difficult topic step by step."),
         S(id: "weak", symbol: "chart.line.uptrend.xyaxis", title: "Review my weaknesses", prompt: "Analyze my performance and help me improve."),
         S(id: "cram", symbol: "bolt", title: "Quick cram", prompt: "I have one hour to study. Help me prioritize."),
+        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", prompt: "Summarize my notes into the key points I should remember."),
     ]
     var body: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 220), spacing: Theme.Space.sm)], spacing: Theme.Space.sm) {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: Theme.Space.sm)], spacing: Theme.Space.sm) {
             ForEach(Self.all) { s in
                 Button { chat.draft = s.prompt } label: {
-                    HStack(spacing: Theme.Space.sm) {
-                        Image(systemName: s.symbol).foregroundStyle(Theme.accent).frame(width: 20)
-                        VStack(alignment: .leading, spacing: 1) { Text(s.title).font(.system(.callout, design: .rounded, weight: .medium)); Text(s.prompt).font(.system(size: 10.5)).foregroundStyle(Theme.textSecondary).lineLimit(1) }
+                    HStack(spacing: 8) {
+                        Image(systemName: s.symbol).foregroundStyle(Theme.accent).frame(width: 18)
+                        Text(s.title).font(.system(.callout, design: .rounded, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 0)
-                    }.padding(.horizontal, 12).padding(.vertical, 9).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-                    .background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control + 2))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).strokeBorder(Theme.border))
-                }.buttonStyle(.plain).accessibilityLabel(s.title).accessibilityHint("Fills the message box so you can edit it before sending")
+                    }.padding(.horizontal, 14).frame(height: 38).frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Theme.surface, in: Capsule()).overlay(Capsule().strokeBorder(Theme.border)).contentShape(Capsule())
+                }.buttonStyle(.plain).help(s.prompt).accessibilityLabel(s.title).accessibilityHint("Fills the message box so you can edit it before sending")
             }
         }
+    }
+}
+
+// MARK: History panel
+
+/// Left panel like a chat app's: search, New chat, and conversations grouped by when they were last used.
+struct ChatHistoryPanel: View {
+    @ObservedObject var chat: ChatModel
+    let rename: (ChatConversation) -> Void
+    let delete: (ChatConversation) -> Void
+
+    private var groups: [(String, [ChatConversation])] {
+        let cal = Calendar.current, now = Date()
+        func bucket(_ d: Date) -> String {
+            if cal.isDateInToday(d) { return "Today" }
+            if cal.isDateInYesterday(d) { return "Yesterday" }
+            if let w = cal.date(byAdding: .day, value: -7, to: cal.startOfDay(for: now)), d >= w { return "Previous 7 days" }
+            return "Older"
+        }
+        let by = Dictionary(grouping: chat.conversations, by: { bucket($0.updatedAt) })
+        return ["Today", "Yesterday", "Previous 7 days", "Older"].compactMap { k in by[k].map { (k, $0) } }
+    }
+
+    var body: some View {
+        VStack(spacing: Theme.Space.md) {
+            SearchField(prompt: "Search chats", text: $chat.historyQuery)
+            Button { chat.newChat() } label: { Label("New chat", systemImage: "plus").frame(maxWidth: .infinity) }.buttonStyle(.primary).keyboardShortcut("n", modifiers: [.command, .shift])
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    if chat.conversations.isEmpty { Text(chat.historyQuery.trimmed.isEmpty ? "No conversations yet." : "No conversations match.").font(.callout).foregroundStyle(Theme.textSecondary).padding(.top, Theme.Space.lg).frame(maxWidth: .infinity) }
+                    ForEach(groups, id: \.0) { g in
+                        Text(g.0).font(Theme.meta).foregroundStyle(Theme.textSecondary).padding(.horizontal, Theme.Space.sm).padding(.top, Theme.Space.md).padding(.bottom, 2)
+                        ForEach(g.1) { c in row(c) }
+                    }
+                }
+            }
+        }.padding(Theme.Space.md)
+    }
+
+    private func row(_ c: ChatConversation) -> some View {
+        let selected = c.id == chat.currentId
+        return Button { chat.open(c.id) } label: {
+            Text(c.title).font(.system(.callout, design: .rounded, weight: selected ? .semibold : .regular)).lineLimit(1).truncationMode(.tail)
+                .foregroundStyle(selected ? Theme.accent : Theme.textPrimary)
+                .padding(.horizontal, Theme.Space.sm).frame(maxWidth: .infinity, minHeight: 34, alignment: .leading).contentShape(Rectangle())
+                .background(selected ? Theme.accent.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+        }.buttonStyle(.plain).help(c.title).accessibilityAddTraits(selected ? .isSelected : [])
+        .contextMenu { Button("Rename…") { rename(c) }; Button("Delete…", role: .destructive) { delete(c) } }
     }
 }
 
@@ -131,6 +170,15 @@ struct Composer: View {
     @EnvironmentObject var model: AppModel
     let compact: Bool
     @FocusState private var focused: Bool
+    @State private var showMath = false
+
+    /// Appends at the end of the draft, wrapped in $…$ so it renders. (A SwiftUI selection binding crashed when the draft was cleared on send,
+    /// so the chat composer does not track the caret; the practice answer fields do insert at the caret.)
+    private func insertMath(_ latex: String) {
+        let e = MathPalette.insert(latex, into: chat.draft, selection: NSRange(location: (chat.draft as NSString).length, length: 0), wrap: true)
+        chat.draft = e.text
+        focused = true
+    }
 
     var body: some View {
         let res = chat.resolution
@@ -161,11 +209,14 @@ struct Composer: View {
                         Divider()
                         ForEach(model.courseList) { c in Button(c.name) { chat.setCourse(c.id) } }
                     } label: { HStack(spacing: 4) { Image(systemName: "book"); Text(model.courseList.first { $0.id == chat.courseId }?.name ?? "All courses").lineLimit(1); Image(systemName: "chevron.down").font(.system(size: 9, weight: .bold)) }.font(.callout) }.menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Course context")
+                    Button { showMath.toggle() } label: { Image(systemName: "function").font(.system(size: 15, weight: .medium)) }.buttonStyle(.plain).help("Insert math (⇧⌘M)").accessibilityLabel("Insert math")
+                        .keyboardShortcut("m", modifiers: [.command, .shift])
+                        .popover(isPresented: $showMath, arrowEdge: .top) { MathPaletteView { insertMath($0) } }
                     Spacer()
                     modelMenu(res)
                     Button { chat.thinking ? chat.stop() : chat.send() } label: {
                         Image(systemName: chat.thinking ? "stop.fill" : "arrow.up").font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                            .frame(width: 30, height: 30).background((chat.draft.trimmed.isEmpty && chat.attached.isEmpty && !chat.thinking) ? Theme.accent.opacity(0.4) : Theme.accent, in: Circle())
+                            .frame(width: 30, height: 30).background((chat.draft.trimmed.isEmpty && chat.attached.isEmpty && !chat.thinking) ? Theme.accent.opacity(0.55) : Theme.accent, in: Circle())
                     }.buttonStyle(.plain).disabled(!chat.thinking && chat.draft.trimmed.isEmpty && chat.attached.isEmpty)
                         .accessibilityLabel(chat.thinking ? "Stop" : "Send").keyboardShortcut(.return, modifiers: .command)
                 }.foregroundStyle(Theme.textSecondary)
@@ -208,8 +259,9 @@ struct Composer: View {
 }
 
 struct ThinkingRow: View {
+    var stage: String?
     var body: some View {
-        HStack(spacing: 8) { ProgressView().controlSize(.small); Text("Working…").font(.callout).foregroundStyle(Theme.textSecondary) }
-            .accessibilityElement(children: .combine).accessibilityLabel("The assistant is working")
+        HStack(spacing: 8) { ProgressView().controlSize(.small); Text((stage ?? "Working") + "…").font(.callout).foregroundStyle(Theme.textSecondary) }
+            .accessibilityElement(children: .combine).accessibilityLabel("The assistant is working: \(stage ?? "starting")")
     }
 }

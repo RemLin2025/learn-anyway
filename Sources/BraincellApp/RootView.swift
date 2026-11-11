@@ -9,6 +9,7 @@ struct RootView: View {
                 VStack(spacing: 0) { FocusEndBanner(); PracticeView(sessionID: sid, app: model).id(sid) }
             } else { library }
         }
+        .sheet(item: $model.practiceSetup) { PracticeSetupSheet(request: $0) }
         .buttonStyle(.secondary)
         .textFieldStyle(AppFieldStyle())
         .tint(Theme.accent)
@@ -38,6 +39,7 @@ struct RootView: View {
             .scrollContentBackground(.hidden)
             .background(Theme.background)
             .toolbar { FocusToolbarButton() }
+            .navigationTitle(model.settingsOpen ? "Settings" : (model.selection ?? .home).rawValue)
         }
     }
 }

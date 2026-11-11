@@ -21,7 +21,7 @@ public enum ResponseSchema {
           "required": ["kind"],
           "properties": {
             "kind": { "enum": ["markdown", "code", "math", "table", "image"] },
-            "text": { "type": "string", "description": "markdown and code blocks. Inline math as $...$." },
+            "text": { "type": "string", "description": "markdown and code blocks. Markdown + LaTeX: inline math as \\( ... \\), display math as \\[ ... \\], parts as **Part A.** lines, fenced code for programs." },
             "language": { "type": "string", "description": "code blocks: python, c, java" },
             "latex": { "type": "string", "description": "math blocks (display math, no $ delimiters)" },
             "headers": { "type": "array", "items": { "type": "string" } },

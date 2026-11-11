@@ -193,15 +193,18 @@ struct AnswerView: View {
     let fontSize: CGFloat
     var pm: PracticeModel? = nil
     var onSubmit: () -> Void
-    @State private var previewMath = true
 
     var body: some View {
         switch spec.type {
         case .flashcard: flashcard
         case .singleChoice, .multipleSelect: choices
         case .shortAnswer:
-            TextField("Your answer", text: $response.text).textFieldStyle(AppFieldStyle()).font(.title3).disabled(locked)
-                .onSubmit { if !response.isEmpty { onSubmit() } }.accessibilityLabel("Your answer")
+            if spec.evaluation.method == .symbolic {
+                MathInputField(text: $response.text, locked: locked, fontSize: fontSize, minHeight: 44, label: "Your answer (math)") { if !response.isEmpty { onSubmit() } }
+            } else {
+                TextField("Your answer", text: $response.text).textFieldStyle(AppFieldStyle()).font(.title3).disabled(locked)
+                    .onSubmit { if !response.isEmpty { onSubmit() } }.accessibilityLabel("Your answer")
+            }
         case .numeric:
             HStack {
                 TextField("Number (e.g. 3.5 or 7/2)", text: $response.text).textFieldStyle(AppFieldStyle()).font(.title3).frame(maxWidth: 260).disabled(locked)
@@ -271,18 +274,9 @@ struct AnswerView: View {
 
     private var written: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Text(spec.type == .derivationProof ? "Write your derivation or proof" : "Write your explanation").font(.subheadline).foregroundStyle(Theme.textSecondary)
-                Spacer()
-                Toggle("Preview math", isOn: $previewMath).toggleStyle(.switch).controlSize(.small).accessibilityLabel("Preview math")
-            }
-            Text("Use $…$ for inline math and $$…$$ for display math, e.g. $$\\frac{a}{b}$$").font(.caption).foregroundStyle(Theme.textSecondary)
-            TextEditor(text: $response.text).font(.system(size: fontSize, design: .monospaced)).frame(minHeight: 200).disabled(locked)
-                .fieldSurface().accessibilityLabel("Written answer")
-            if previewMath, !response.text.isEmpty {
-                Text("Preview").font(.caption.weight(.semibold)).foregroundStyle(Theme.textSecondary)
-                Card { RichText(text: response.text) }
-            }
+            Text(spec.type == .derivationProof ? "Write your derivation or proof" : "Write your explanation").font(.subheadline).foregroundStyle(Theme.textSecondary)
+            Text("Use Insert Math for symbols and templates, or type $…$ for inline math and $$…$$ for display math.").font(.caption).foregroundStyle(Theme.textSecondary)
+            MathInputField(text: $response.text, prose: true, locked: locked, fontSize: fontSize, minHeight: 200, label: "Written answer")
         }
     }
 }

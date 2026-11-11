@@ -16,9 +16,7 @@ struct SkillsView: View {
     var body: some View {
         VStack(spacing: 0) {
             HStack {
-                Picker("Course", selection: $courseId) {
-                    ForEach(model.courseList) { Text($0.name).tag(UUID?.some($0.id)) }
-                }.frame(maxWidth: 260)
+                FilterMenu(title: "Course", selection: $courseId, options: model.courseList.map { ($0.id, $0.name) }, allowsAny: false)
                 if let c = courseId, let s = try? model.progression?.courseXP(c) {
                     Badge(text: "Course level \(s.level) · \(s.xp) XP")
                 }
@@ -42,7 +40,7 @@ struct SkillsView: View {
                             if let m, !m.isUnknown { Badge(text: m.confidence.label, color: color(m.confidence)) } else { Badge(text: "Unknown", color: Theme.textSecondary) }
                         }.tag(r.skill.id).accessibilityElement(children: .combine)
                     } }
-                    }.sidePanel().frame(minWidth: 300, idealWidth: 420)
+                    }.sidePanel().listPaneWidth()
                     Group {
                         if let id = selected, let r = rows.first(where: { $0.skill.id == id }), let m = masteries[id] {
                             SkillDetail(skill: r.skill, mastery: m, xp: xp[id] ?? XPSummary(xp: 0), courseId: courseId!).id("\(id)-\(model.revision)")

@@ -88,7 +88,7 @@ import Foundation
     }
 
     @Test func unsupportedOrBrokenFallsBack() {
-        #expect(Latex.unicode("\\begin{matrix} a \\end{matrix}") == nil)
+        #expect(Latex.unicode("\\begin{array} a \\end{array}") == nil)
         #expect(Latex.unicode("\\unknowncmd{x}") == nil)
         #expect(Latex.unicode("{x") == nil)
         #expect(Latex.unicode("x}") == nil)

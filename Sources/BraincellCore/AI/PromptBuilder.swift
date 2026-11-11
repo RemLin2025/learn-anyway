@@ -160,7 +160,7 @@ enum PromptBuilder {
         1. Reply with ONE JSON object and nothing else (a ```json fence is fine). It must match the schema.
         2. `schemaVersion` must be "\(QuestionSchema.version)". `requestId` must be exactly "\(i.requestId)".
         3. Every question needs: importId (q1, q2, …), type, title, difficulty (1–5), learningObjective, content (blocks), answer, evaluation, hints (1–3 progressive hints, least revealing first), solution (blocks), skills (exact names from the list), assessments (names, optional), sources ({document, page}).
-        4. Math: use LaTeX — inline as $...$ inside markdown, or a `math` block with `latex`. No HTML, no scripts, no links that need executing.
+        4. Math and formatting (markdown blocks): write prose as Markdown. Put short notation inside sentences as inline math \\( ... \\), e.g. \\(X\\) and \\(Y\\). Put every longer or important formula on its own line as display math \\[ ... \\]; use \\begin{aligned} ... \\end{aligned} for multi-line derivations. Never write formulas as plain text (not `U=(X-E[X])/σ_X`; write \\[U=\\frac{X-\\mathbb{E}[X]}{\\sigma_X}\\]). Split the question into short paragraphs: context, definitions, conditions, then each part on its own line starting with **Part A.**, **Part B.** … Use fenced code blocks for code. Do not use HTML, scripts or links. Do not change what a formula means to make it fit. In the JSON text every backslash must be written twice (so \\\\\\\\frac in the JSON means \\\\frac).
         5. Code goes in `code` blocks with `language` python, c or java. Never rely on running code; give expected output yourself and double-check it by hand.
         6. Be certain the stated answers are correct. If you are unsure, pick a different question.
 

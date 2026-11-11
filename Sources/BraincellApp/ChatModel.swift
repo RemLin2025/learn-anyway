@@ -18,24 +18,36 @@ final class ChatModel: ObservableObject {
     @Published private(set) var attached: [URL] = []
     @Published var importing = false
     @Published var notice: String?
+    /// The real workflow stage being run ("Reading sources"), shown while thinking. Never model reasoning.
+    @Published private(set) var stage: String?
+    @Published var historyQuery = "" { didSet { reloadList() } }
     private var task: Task<Void, Never>?
+    /// Identifies the running operation. Events from a stopped, superseded or other-conversation operation carry an old id and are ignored.
+    private var currentOp: UUID?
 
-    init(app: AppModel, ctx: AgentContext) { self.app = app; self.ctx = ctx; runner = AgentRunner(ctx); reloadList() }
+    init(app: AppModel, ctx: AgentContext) {
+        self.app = app; self.ctx = ctx; runner = AgentRunner(ctx)
+        try? StudyPrep.recoverInterrupted(ctx.db)
+        _ = try? ctx.store.recoverInterrupted()           // work cut short by the last quit is reported honestly, with Retry
+        reloadList()
+    }
 
     var store: AgentStore { ctx.store }
     var isEmpty: Bool { messages.isEmpty }
 
-    private var events: @Sendable (AgentEvent) -> Void {
+    private func events(op: UUID, conv: UUID) -> @Sendable (AgentEvent) -> Void {
         { [weak self] e in Task { @MainActor in
-            switch e { case .changed: self?.reload(); case .thinking(let on): self?.thinking = on }
+            guard let self, self.currentOp == op, self.currentId == conv else { return }          // late event from a cancelled or other operation
+            switch e { case .changed: self.reload(); case .thinking(let on): self.thinking = on; if !on { self.stage = nil }; case .stage(let s): self.stage = s }
         } }
     }
 
-    func reloadList() { conversations = (try? store.conversations()) ?? [] }
+    func reloadList() { conversations = (try? (historyQuery.trimmed.isEmpty ? store.conversations() : store.search(historyQuery))) ?? [] }
     func reload() {
         reloadList()
-        messages = currentId.flatMap { try? store.messages($0) } ?? []
+        messages = (currentId.flatMap { try? store.messages($0) } ?? []).filter { $0.kind != .call }      // raw tool-call replies stay out of the transcript
     }
+    var canRegenerate: Bool { !thinking && messages.last.map { $0.role == .assistant && $0.kind == .text } == true }
 
     // MARK: Conversations
 
@@ -62,20 +74,25 @@ final class ChatModel: ObservableObject {
             guard let made = try? store.createConversation(courseId: courseId) else { return }
             id = made.id; currentId = id
         }
-        run { await $0.send(id, text: message, events: $1) }
+        run(id) { await $0.send(id, text: message, events: $1) }
     }
 
-    func stop() { task?.cancel(); task = nil; thinking = false }
-    func approve(_ actionId: UUID) { run { await $0.approve(actionId, events: $1) } }
-    func decline(_ actionId: UUID) { run { await $0.decline(actionId, events: $1) } }
-    func retry() { guard let id = currentId else { return }; run { await $0.retry(id, events: $1) } }
-    func savePreview(_ generationId: UUID) { run { await $0.saveGeneration(generationId, events: $1) } }
-    func discardPreview(_ generationId: UUID) { runner.discardGeneration(generationId, events: events); reload() }
+    func edit(_ messageId: UUID, text: String) { guard let id = currentId, !thinking else { return }; run(id) { await $0.edit(messageId, text: text, events: $1) } }
+    func regenerate() { guard let id = currentId, canRegenerate else { return }; run(id) { await $0.regenerate(id, events: $1) } }
+    func restoreEdit(_ messageId: UUID) { guard !thinking else { return }; try? store.restoreEdit(messageId); reload() }
 
-    private func run(_ work: @escaping @Sendable (AgentRunner, @escaping @Sendable (AgentEvent) -> Void) async -> Void) {
-        let r = runner, ev = events
-        thinking = true
-        task = Task { await work(r, ev); await MainActor.run { self.thinking = false; self.task = nil; self.reload() } }
+    func stop() { task?.cancel(); task = nil; currentOp = nil; thinking = false; stage = nil }
+    func approve(_ actionId: UUID) { guard let id = currentId else { return }; run(id) { await $0.approve(actionId, events: $1) } }
+    func decline(_ actionId: UUID) { guard let id = currentId else { return }; run(id) { await $0.decline(actionId, events: $1) } }
+    func retry() { guard let id = currentId else { return }; run(id) { await $0.retry(id, events: $1) } }
+    func savePreview(_ generationId: UUID) { guard let id = currentId else { return }; run(id) { await $0.saveGeneration(generationId, events: $1) } }
+    func discardPreview(_ generationId: UUID) { guard let id = currentId else { return }; runner.discardGeneration(generationId, events: events(op: currentOp ?? UUID(), conv: id)); reload() }
+
+    private func run(_ conv: UUID, _ work: @escaping @Sendable (AgentRunner, @escaping @Sendable (AgentEvent) -> Void) async -> Void) {
+        let op = UUID(); currentOp = op
+        let r = runner, ev = events(op: op, conv: conv)
+        thinking = true; stage = nil
+        task = Task { await work(r, ev); await MainActor.run { guard self.currentOp == op else { return }; self.thinking = false; self.stage = nil; self.task = nil; self.reload() } }
     }
 
     // MARK: Attachments (imported through the Library, so Materials and Library show them too)
@@ -111,17 +128,27 @@ final class ChatModel: ObservableObject {
         switch chip.action {
         case "openCourse": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses }
         case "openLibrary": app.selection = .library
-        case "openQuestionBank": app.selection = .questionBank
-        case "openSkills": app.selection = .skills
+        case "openQuestionBank": app.questionBankCourse = chip.courseId; app.selection = .questionBank
+        case "openSkills": if let id = chip.courseId { app.selectedCourseID = id }; app.selection = .skills
         case "addFiles": pickFiles(into: chip.courseId, thenSend: true)
         case "startPractice":
             if let p = chip.planId { startPlanDay(planId: p, dayIndex: chip.dayIndex ?? 0) }
-            else if let id = chip.courseId, let c = app.courseList.first(where: { $0.id == id }) { app.practiceCourse(c) }
+            else if let id = chip.courseId { app.practiceSetup = PracticeSetupRequest(courseId: id, assessmentId: chip.assessmentId) }
+        case "prepareExam":
+            // Resume or regenerate: the job is idempotent, so this continues from the saved stage and skips finished work.
+            let c = app.courseList.first { $0.id == chip.courseId }?.name ?? "my course", a = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
+            draft = "Prepare \(a ?? "my exam") in \(c)."; send()
         case "startReviews": app.startReviews()
         case "resumeSession": if let s = app.resumableSession { app.activeSessionID = s.id } else { app.alertMessage = "There is no unfinished session to resume." }
         case "openPlan": if let p = chip.planId, let conv = try? store.plan(p)?.conversationId { open(conv) }
         default: break
         }
+    }
+
+    /// Runs the saved-progress exam preparation in Home chat (topics + questions); finished work is reused.
+    func analyzeTopics(course: Course, assessment: Assessment?) {
+        app.selection = .home
+        draft = "Prepare \(assessment?.name ?? "my exam") in \(course.name)."; send()
     }
 
     func startPlanDay(planId: UUID, dayIndex: Int) {

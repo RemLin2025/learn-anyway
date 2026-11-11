@@ -74,7 +74,7 @@ struct UsageView: View {
 
     private var controls: some View {
         HStack {
-            Picker("Period", selection: $span) { ForEach(Span.allCases) { Text($0.rawValue).tag($0) } }.labelsHidden().frame(width: 170)
+            FilterMenu(title: "Period", selection: Binding(get: { span }, set: { span = $0 ?? .d30 }), options: Span.allCases.map { ($0, $0.rawValue) }, allowsAny: false)
             if span == .custom { DatePicker("From", selection: $from, displayedComponents: .date).labelsHidden(); Text("to"); DatePicker("To", selection: $to, displayedComponents: .date).labelsHidden() }
             Spacer()
             Menu("Export") {
@@ -90,6 +90,8 @@ struct UsageView: View {
             HStack(alignment: .top, spacing: Theme.Space.md) {
                 metric("Total Requests", "\(t.requests)", open: $openRequests)
                 metric("Total Tokens", t.totalTokens.formatted(), open: $openTokens)
+                plainMetric("Estimated cost", t.unknownCostRequests == t.succeeded && t.succeeded > 0 ? "Unknown" : money(t.knownCostMicros, complete: t.costIsComplete), note: t.costIsComplete ? "Estimate, not an invoice" : "\(t.unknownCostRequests) request(s) have no price")
+                plainMetric("Failed", t.requests == 0 ? "—" : "\(t.failed)", note: t.requests == 0 ? "No requests" : String(format: "%.0f%% of requests", Double(t.failed) / Double(t.requests) * 100))
             }
             if openRequests {
                 Card {
@@ -131,6 +133,17 @@ struct UsageView: View {
         }.buttonStyle(.plain).accessibilityLabel("\(title): \(value)").accessibilityHint(open.wrappedValue ? "Hides the breakdown" : "Shows the breakdown")
     }
 
+    /// Same tile as `metric`, for a figure with no breakdown behind it.
+    private func plainMetric(_ title: String, _ value: String, note: String) -> some View {
+        Card(padding: Theme.Space.lg) {
+            VStack(alignment: .leading, spacing: 6) {
+                Text(title).font(.callout).foregroundStyle(Theme.textSecondary)
+                Text(value).font(.system(size: 30, weight: .semibold, design: .rounded)).monospacedDigit().minimumScaleFactor(0.6).lineLimit(1)
+                Text(note).font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1)
+            }.frame(maxWidth: .infinity, alignment: .leading)
+        }.accessibilityElement(children: .combine)
+    }
+
     private func stat(_ t: String, _ v: String, note: String? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) { Text(t).font(Theme.meta).foregroundStyle(Theme.textSecondary); Text(v).font(.system(.title3, design: .rounded, weight: .semibold)).monospacedDigit(); if let note { Text(note).font(.system(size: 10)).foregroundStyle(Theme.textSecondary) } }
     }
@@ -156,10 +169,10 @@ struct UsageView: View {
             VStack(alignment: .leading, spacing: Theme.Space.sm) {
                 HStack {
                     Text("Request History").font(Theme.cardTitle); Spacer()
-                    Picker("Provider", selection: $providerFilter) { Text("All providers").tag(""); ForEach(providers, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 130)
-                    Picker("Model", selection: $modelFilter) { Text("All models").tag(""); ForEach(models, id: \.self) { Text($0).tag($0) } }.labelsHidden().frame(width: 150)
-                    Picker("Capability", selection: $capFilter) { Text("All capabilities").tag(Capability?.none); ForEach(Capability.allCases) { Text($0.label).tag(Capability?.some($0)) } }.labelsHidden().frame(width: 170)
-                    Picker("Status", selection: $statusFilter) { Text("All").tag("all"); Text("Success").tag("success"); Text("Failed").tag("failed") }.labelsHidden().frame(width: 110)
+                    FilterMenu(title: "Provider", selection: Binding(get: { providerFilter.isEmpty ? nil : providerFilter }, set: { providerFilter = $0 ?? "" }), options: providers.map { ($0, $0) }, anyLabel: "All providers")
+                    FilterMenu(title: "Model", selection: Binding(get: { modelFilter.isEmpty ? nil : modelFilter }, set: { modelFilter = $0 ?? "" }), options: models.map { ($0, $0) }, anyLabel: "All models")
+                    FilterMenu(title: "Capability", selection: $capFilter, options: Capability.allCases.map { ($0, $0.label) }, anyLabel: "All capabilities")
+                    FilterMenu(title: "Status", selection: Binding(get: { statusFilter == "all" ? nil : statusFilter }, set: { statusFilter = $0 ?? "all" }), options: [("success", "Success"), ("failed", "Failed")], anyLabel: "All statuses")
                 }
                 Table(list, selection: $picked, sortOrder: $sortOrder) {
                     TableColumn("Time", value: \.ts) { Text($0.ts.formatted(.dateTime.month(.abbreviated).day().hour().minute())) }.width(130)

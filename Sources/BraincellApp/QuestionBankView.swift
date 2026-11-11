@@ -21,7 +21,7 @@ struct QuestionBankView: View {
         VStack(spacing: 0) {
             filterBar
             HSplitView {
-                list.sidePanel().frame(minWidth: 320, idealWidth: 400)
+                list.sidePanel().listPaneWidth()
                 Group {
                     if selection.count > 1 { bulkPanel }
                     else if let detail { QuestionPreview(detail: detail) { editing = detail }.id(detail.revision.id) }
@@ -34,6 +34,9 @@ struct QuestionBankView: View {
                 .disabled(rows.isEmpty).help("Practice the selected questions, or everything shown")
         }
         .task(id: model.revision) { load() }
+        .onAppear { applyCourseFocus() }
+        .onChange(of: model.questionBankCourse) { _, _ in applyCourseFocus() }
+        .onChange(of: filter.courseId) { _, _ in filter.assessmentId = nil; filter.skillId = nil }   // hidden filters must not keep applying
         .onChange(of: filter) { _, _ in load() }
         .onChange(of: selection) { _, _ in loadDetail() }
         .sheet(item: $editing) { QuestionEditor(detail: $0) }
@@ -43,32 +46,20 @@ struct QuestionBankView: View {
     }
 
     private var filterBar: some View {
-        ScrollView(.horizontal, showsIndicators: false) { filterControls }.controlStrip()
+        // Fits without scrolling when there is room (menus inside a scroll view are less reliable); scrolls only on a narrow window.
+        ViewThatFits(in: .horizontal) { filterControls; ScrollView(.horizontal, showsIndicators: false) { filterControls } }.controlStrip()
     }
 
     private var filterControls: some View {
         HStack(spacing: 8) {
             SearchField(prompt: "Search questions", text: $filter.text).frame(width: 200)
-            Picker("Course", selection: $filter.courseId) {
-                Text("All courses").tag(UUID?.none)
-                ForEach(courses) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118)
-            Picker("Assessment", selection: $filter.assessmentId) {
-                Text("Any assessment").tag(UUID?.none)
-                ForEach(assessments) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118).disabled(filter.courseId == nil)
-            Picker("Skill", selection: $filter.skillId) {
-                Text("Any skill").tag(UUID?.none)
-                ForEach(skills) { Text($0.name).tag(UUID?.some($0.id)) }
-            }.labelsHidden().frame(width: 118).disabled(filter.courseId == nil)
-            Picker("Type", selection: $filter.type) {
-                Text("Any type").tag(QuestionType?.none)
-                ForEach(QuestionType.allCases, id: \.self) { Text($0.label).tag(QuestionType?.some($0)) }
-            }.labelsHidden().frame(width: 118)
-            Picker("Status", selection: $filter.readiness) {
-                Text("Any status").tag(Readiness?.none)
-                ForEach([Readiness.verified, .unverified, .needsReview], id: \.self) { Text($0.label).tag(Readiness?.some($0)) }
-            }.labelsHidden().frame(width: 118)
+            FilterMenu(title: "Course", selection: $filter.courseId, options: courses.map { ($0.id, $0.name) })
+            if filter.courseId != nil {          // assessment and skill only mean something inside one course
+                FilterMenu(title: "Assessment", selection: $filter.assessmentId, options: assessments.map { ($0.id, $0.name) })
+                FilterMenu(title: "Skill", selection: $filter.skillId, options: skills.map { ($0.id, $0.name) })
+            }
+            FilterMenu(title: "Type", selection: $filter.type, options: QuestionType.allCases.map { ($0, $0.label) })
+            FilterMenu(title: "Status", selection: $filter.readiness, options: [Readiness.verified, .unverified, .needsReview].map { ($0, $0.label) })
             Menu {
                 Section("Difficulty") {
                     Button("Any") { filter.minDifficulty = nil; filter.maxDifficulty = nil }
@@ -163,6 +154,12 @@ struct QuestionBankView: View {
                 }
             }
         }.frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private func applyCourseFocus() {
+        guard let c = model.questionBankCourse else { return }
+        var f = QuestionFilter(); f.courseId = c; filter = f
+        model.questionBankCourse = nil
     }
 
     private func load() {

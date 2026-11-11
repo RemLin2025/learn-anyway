@@ -170,7 +170,7 @@ public struct GatewayConfigExport: Codable, Sendable {
             let n = AIConnection(id: UUID(), providerId: c.providerId, name: c.name, baseURL: c.baseURL, enabled: c.enabled, status: .configured, lastCheckedAt: nil, createdAt: Date())
             try s.save(n); existing.append(n)
         }
-        for c in existing where ProviderRegistry.spec(c.providerId)?.needsKey == true && ((try? secrets.read(c.keyAccount)) ?? nil) == nil { missing.append(c.name) }
+        for c in existing where ProviderRegistry.spec(c.providerId)?.needsKey == true && !secrets.contains(c.keyAccount) { missing.append(c.name) }
         for m in models { if let c = find(m.providerId, m.connection) {
             var r = AIModelRecord(id: UUID(), connectionId: c.id, modelId: m.modelId, displayName: m.displayName, capability: m.capability, source: "imported", inputPricePerM: m.inputPricePerM, outputPricePerM: m.outputPricePerM, health: .untested, createdAt: Date())
             r.customInputPricePerM = m.customInputPricePerM; r.customOutputPricePerM = m.customOutputPricePerM

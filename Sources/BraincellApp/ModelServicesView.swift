@@ -30,16 +30,10 @@ struct ModelServicesView: View {
                 tabBar
                 Divider()
                 HStack(alignment: .top, spacing: 0) {
-                    List(providers, selection: Binding(get: { spec.id }, set: { if let v = $0 { providerId = v; key = ""; baseURL = ""; connName = ""; selectedModel = nil } })) { p in
-                        HStack(spacing: Theme.Space.md) {
-                            ProviderIcon(symbol: p.symbol, size: 30)
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(p.name).font(.system(.body, design: .rounded, weight: .medium))
-                                let c = cfg.connections(for: p.id).first
-                                StatusDot(color: p.supports(tab) ? (c?.status.color ?? Theme.textSecondary) : Theme.attention,
-                                          text: !p.supports(tab) ? "Not supported yet" : (c?.status.label ?? "Not configured"))
-                            }
-                        }.padding(.vertical, 2).tag(p.id).accessibilityElement(children: .combine)
+                    List(selection: Binding(get: { spec.id }, set: { if let v = $0 { providerId = v; key = ""; baseURL = ""; connName = ""; selectedModel = nil } })) {
+                        Section { ForEach(providers.filter { $0.supports(tab) }) { providerRow($0) } }
+                        let unsupported = providers.filter { !$0.supports(tab) }
+                        if !unsupported.isEmpty { Section("Not supported yet") { ForEach(unsupported) { providerRow($0) } } }
                     }.sidePanel().frame(width: 220)
                     ScrollView { detail.padding(Theme.Space.xl).frame(maxWidth: 860, alignment: .leading).frame(maxWidth: .infinity, alignment: .leading) }
                         .overlay(alignment: .trailing) {
@@ -91,8 +85,8 @@ struct ModelServicesView: View {
     }
 
     private var tabBar: some View {
-        ScrollView(.horizontal, showsIndicators: true) {
-            HStack(spacing: Theme.Space.xs) {
+        VStack(alignment: .leading) {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: Theme.Space.xs, alignment: .leading)], alignment: .leading, spacing: Theme.Space.xs) {
                 ForEach(Capability.allCases) { c in
                     Button { tab = c; providerId = ProviderRegistry.providers(for: c).first?.id ?? "" } label: {
                         Label(c.label, systemImage: c.symbol).font(.system(.callout, design: .rounded, weight: tab == c ? .semibold : .regular))
@@ -103,6 +97,18 @@ struct ModelServicesView: View {
                 }
             }.padding(.horizontal, Theme.Space.xl).padding(.bottom, Theme.Space.sm)
         }
+    }
+
+    private func providerRow(_ p: ProviderSpec) -> some View {
+        HStack(spacing: Theme.Space.md) {
+            ProviderIcon(symbol: p.symbol, size: 30)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(p.name).font(.system(.body, design: .rounded, weight: .medium))
+                let c = cfg.connections(for: p.id).first
+                StatusDot(color: p.supports(tab) ? (c?.status.color ?? Theme.textSecondary) : Theme.attention,
+                          text: !p.supports(tab) ? "Not supported yet" : (c?.status.label ?? "Not configured"))
+            }
+        }.padding(.vertical, 2).tag(p.id).accessibilityElement(children: .combine)
     }
 
     // MARK: Detail

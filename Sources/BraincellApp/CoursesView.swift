@@ -22,7 +22,7 @@ struct CoursesView: View {
                 }
             }
             .sidePanel()
-            .frame(minWidth: 190, idealWidth: 220, maxWidth: 300)
+            .frame(minWidth: 200, idealWidth: 240, maxWidth: 300)   // course picker; narrower than a list pane because a second list sits beside it
             .overlay { if model.courseList.isEmpty { Text("No courses yet").foregroundStyle(Theme.textSecondary) } }
 
             Group {
@@ -33,7 +33,7 @@ struct CoursesView: View {
                                    message: "Create a course for an exam, or start a Quick Cram on a single topic.",
                                    actionTitle: "New Course") { showNew = true }
                 } else {
-                    EmptyStateView(symbol: "sidebar.left", title: "Select a course", message: "Choose a course to manage its assessments, topics and materials.")
+                    CourseCardGrid(onNew: { showNew = true })
                 }
             }
             .frame(minWidth: 520)
@@ -153,7 +153,7 @@ struct AssessmentsTab: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack { Text(a.name).font(Theme.cardTitle)
                                     if a.isCumulative { Badge(text: "Cumulative", color: Theme.mastery) } }
-                                if let d = a.deadline { Text("Due \(d.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(Theme.textSecondary) }
+                                Text(a.deadline.map { "Due \($0.formatted(date: .abbreviated, time: .omitted))" } ?? "No due date").font(.caption).foregroundStyle(Theme.textSecondary)
                             }.tag(a.id)
                             .contextMenu {
                                 Button("Edit…") { editing = a }
@@ -164,7 +164,7 @@ struct AssessmentsTab: View {
                     Button { adding = true } label: { Label("Add Assessment", systemImage: "plus") }.padding(Theme.Space.md)
                 }
             }
-            .sidePanel().frame(minWidth: 240, idealWidth: 280, maxWidth: 360)
+            .sidePanel().listPaneWidth()
 
             Group {
                 if let a = assessments.first(where: { $0.id == selected }) { scopeEditor(a) }
@@ -258,58 +258,98 @@ struct AssessmentSheet: View {
 struct TopicsTab: View {
     @EnvironmentObject var model: AppModel
     let course: Course
-    @State private var rows: [SkillTree.Row] = []
-    @State private var relations: [SkillRelation] = []
+    @State private var rows: [TopicRow] = []
+    @State private var assessments: [Assessment] = []
+    @State private var assessmentId: UUID?
+    @State private var search = ""
+    @State private var collapsed: Set<UUID> = []
+    @State private var minImportance = "any"
     @State private var name = ""
     @State private var parent: UUID?
     @State private var renaming: Skill?
     @State private var renameText = ""
+    @State private var sourcesFor: TopicRow?
+
+    /// Rows after search, importance filter and collapsed parents (a collapsed parent hides everything deeper until the next sibling).
+    private var visible: [TopicRow] {
+        var out: [TopicRow] = [], hideBelow: Int?
+        for r in rows {
+            if let d = hideBelow { if r.depth > d { continue } else { hideBelow = nil } }
+            if collapsed.contains(r.id) { hideBelow = r.depth }
+            out.append(r)
+        }
+        let q = search.trimmed.lowercased()
+        return out.filter { r in
+            (q.isEmpty || r.skill.name.lowercased().contains(q)) && (minImportance == "any" || r.level == minImportance)
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
+                Picker("Assessment", selection: $assessmentId) { Text("All topics").tag(UUID?.none); ForEach(assessments) { Text($0.name).tag(UUID?.some($0.id)) } }.frame(maxWidth: 220)
+                Picker("Importance", selection: $minImportance) { Text("Any importance").tag("any"); Text("High").tag("high"); Text("Medium").tag("medium"); Text("Low").tag("low") }.frame(maxWidth: 170)
+                TextField("Search topics", text: $search).frame(maxWidth: 200).accessibilityLabel("Search topics")
+                Spacer()
+                Button { model.practiceSetup = PracticeSetupRequest(courseId: course.id, assessmentId: assessmentId) } label: { Label("Practice", systemImage: "play.fill") }.buttonStyle(.primary).disabled(rows.allSatisfy { $0.questionCount == 0 })
+                Button("Analyze with Chat") { model.chat?.analyzeTopics(course: course, assessment: assessments.first { $0.id == assessmentId }) }.help("Re-run topic analysis and question generation in Chat. Your edits are kept; new topics are added.")
+            }.padding([.horizontal, .top], 16)
+            HStack {
                 TextField("Add a topic", text: $name).onSubmit(add).accessibilityLabel("New topic name")
                 Picker("Under", selection: $parent) {
                     Text("Top level").tag(UUID?.none)
-                    ForEach(rows, id: \.skill.id) { Text($0.skill.name).tag(UUID?.some($0.skill.id)) }
+                    ForEach(rows) { Text($0.skill.name).tag(UUID?.some($0.id)) }
                 }.frame(maxWidth: 220)
                 Button("Add", action: add).disabled(name.trimmed.isEmpty)
-            }.padding([.horizontal, .top], 16)
+            }.padding(.horizontal, 16)
             if rows.isEmpty {
                 EmptyStateView(symbol: "list.bullet.indent", title: "No topics yet",
-                               message: "Enter the topics this course covers. Adding a name that already exists in this course reuses it rather than duplicating it.")
+                               message: "Ask Home chat to “prepare me for” an exam and topics are built from your materials, or add them by hand. Adding a name that already exists reuses it.")
             } else {
-                List(rows, id: \.skill.id) { r in
-                    HStack {
-                        Text(r.skill.name).padding(.leading, CGFloat(r.depth) * 18)
-                        Spacer()
-                        let prereqs = prerequisiteNames(for: r.skill)
-                        if !prereqs.isEmpty { Badge(text: "needs " + prereqs.joined(separator: ", "), color: Theme.attention) }
-                        Badge(text: "Not assessed", color: Theme.textSecondary)
-                    }
-                    .contextMenu {
-                        Button("Rename…") { renaming = r.skill; renameText = r.skill.name }
-                        Menu("Add Prerequisite") {
-                            ForEach(rows.filter { $0.skill.id != r.skill.id }, id: \.skill.id) { p in
-                                Button(p.skill.name) { model.perform { try model.courses?.addRelation(from: p.skill.id, to: r.skill.id, kind: .prerequisite) } }
-                            }
-                        }
-                        Button("Archive", role: .destructive) { model.perform { try model.courses?.archiveSkill(r.skill.id) } }
-                    }
-                }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.surface)
+                if assessmentId != nil { Text("Estimated study priority is a suggestion based on your materials, not the real exam split. Only “Official” values come from your instructor.").font(.caption).foregroundStyle(Theme.textSecondary).padding(.horizontal, 16) }
+                List(visible) { r in row(r) }.listStyle(.plain).scrollContentBackground(.hidden).background(Theme.surface)
             }
         }
-        .task(id: model.revision) { load() }
+        .task(id: "\(model.revision)-\(assessmentId?.uuidString ?? "")") { load() }
         .sheet(item: $renaming) { s in
             NameSheet(title: "Rename Topic", prompt: "Name", text: $renameText, confirm: "Rename") {
                 model.perform { try model.courses?.renameSkill(s.id, to: renameText) }
             }
         }
+        .popover(item: $sourcesFor) { r in
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Sources for “\(r.skill.name)”").font(.headline)
+                if !r.evidence.isEmpty { Text(r.evidence).font(.caption).foregroundStyle(Theme.textSecondary) }
+                ForEach(r.sources, id: \.self) { Text("\($0.documentName)\($0.page.map { ", p.\($0)" } ?? "")") }
+            }.padding(12).frame(width: 320)
+        }
     }
 
-    private func prerequisiteNames(for s: Skill) -> [String] {
-        let byId = Dictionary(uniqueKeysWithValues: rows.map { ($0.skill.id, $0.skill.name) })
-        return relations.filter { $0.kind == .prerequisite && $0.toSkillId == s.id }.compactMap { byId[$0.fromSkillId] }
+    @ViewBuilder private func row(_ r: TopicRow) -> some View {
+        HStack(spacing: 8) {
+            Group {
+                if r.hasChildren { Button { if collapsed.contains(r.id) { collapsed.remove(r.id) } else { collapsed.insert(r.id) } } label: { Image(systemName: collapsed.contains(r.id) ? "chevron.right" : "chevron.down").frame(width: 14) }.buttonStyle(.plain).accessibilityLabel(collapsed.contains(r.id) ? "Expand" : "Collapse") }
+                else { Color.clear.frame(width: 14, height: 1) }
+            }.padding(.leading, CGFloat(r.depth) * 18)
+            Text(r.skill.name).foregroundStyle(r.inScope ? Theme.textPrimary : Theme.textSecondary).strikethrough(!r.inScope)
+            Spacer()
+            if let l = r.level { Badge(text: l.capitalized, color: l == "high" ? Theme.attention : Theme.accent) }
+            Badge(text: r.weight.label, color: { if case .official = r.weight { return Theme.mastery }; return Theme.textSecondary }())
+            if !r.sources.isEmpty { Button { sourcesFor = r } label: { Label("\(r.sources.count)", systemImage: "doc.text") }.buttonStyle(.plain).help("View sources").accessibilityLabel("\(r.sources.count) sources") }
+            Text(r.questionCount == 0 ? "no questions" : "\(r.questionCount) q").font(.caption).foregroundStyle(Theme.textSecondary)
+            Button { model.practiceSetup = PracticeSetupRequest(courseId: course.id, assessmentId: assessmentId, skillIds: [r.id]) } label: { Image(systemName: "play.circle") }.buttonStyle(.plain).disabled(r.questionCount == 0).help("Practice this topic").accessibilityLabel("Practice \(r.skill.name)")
+        }
+        .contextMenu {
+            Button("Rename…") { renaming = r.skill; renameText = r.skill.name }
+            if let a = assessmentId {
+                Menu("Importance for this assessment") { ForEach(["high", "medium", "low"], id: \.self) { l in Button(l.capitalized) { model.perform { try model.courses?.setImportance(assessmentId: a, skillId: r.id, level: l) } } } }
+                if r.inScope { Button("Exclude from this assessment") { model.perform { try model.courses?.removeFromScope(assessmentId: a, skillId: r.id) } } }
+                else { Button("Mark as exam-relevant") { model.perform { try model.courses?.addToScope(assessmentId: a, skillId: r.id, importance: nil, source: .userAdjusted) } } }
+            }
+            Button("Generate practice questions…") { model.generateRequest = GenerateRequest(courseId: course.id, skillIds: [r.id], notes: "Create new questions for “\(r.skill.name)”.") }
+            Menu("Merge into…") { ForEach(rows.filter { $0.id != r.id }) { t in Button(t.skill.name) { model.perform { try model.courses?.mergeSkills(from: r.id, into: t.id) } } } }
+            Button("Archive", role: .destructive) { model.perform { try model.courses?.archiveSkill(r.skill.id) } }
+        }
     }
 
     private func add() {
@@ -319,10 +359,9 @@ struct TopicsTab: View {
     }
 
     private func load() {
-        guard let c = model.courses else { return }
-        let skills = (try? c.skills(courseId: course.id)) ?? []
-        relations = (try? c.relations(courseId: course.id)) ?? []
-        rows = SkillTree.flatten(skills, relations: relations)
+        guard let c = model.courses, let st = model.agentStore else { return }
+        assessments = (try? c.assessments(courseId: course.id)) ?? []
+        rows = ((try? c.topicRows(courseId: course.id, assessmentId: assessmentId, store: st)) ?? [])
     }
 }
 
@@ -371,5 +410,78 @@ struct DeletedSheet: View {
             Divider()
             RecentlyDeletedView()
         }.frame(width: 680, height: 480).background(Theme.background)
+    }
+}
+
+
+// MARK: Course overview
+
+/// What you see before opening a course: one card per course with what matters at a glance.
+struct CourseCardGrid: View {
+    @EnvironmentObject var model: AppModel
+    let onNew: () -> Void
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: Theme.Space.lg) {
+                HStack {
+                    Text("Your courses").font(Theme.pageTitle)
+                    Spacer()
+                    Button { onNew() } label: { Label("New Course", systemImage: "plus") }.buttonStyle(.primary)
+                }
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 250, maximum: 360), spacing: Theme.Space.lg)], spacing: Theme.Space.lg) {
+                    ForEach(model.courseList) { c in CourseCard(course: c) { model.selectedCourseID = c.id } }
+                }
+            }.padding(Theme.Space.xl)
+        }
+    }
+}
+
+struct CourseCard: View {
+    @EnvironmentObject var model: AppModel
+    let course: Course
+    let open: () -> Void
+    @State private var questions: Int?
+    @State private var materials: Int?
+    @State private var next: Assessment?
+    @State private var hover = false
+    var body: some View {
+        Button(action: open) {
+            VStack(alignment: .leading, spacing: Theme.Space.md) {
+                HStack(spacing: Theme.Space.sm) {
+                    Image(systemName: course.kind == .quickCram ? "bolt.fill" : "graduationcap.fill").foregroundStyle(course.kind == .quickCram ? Theme.attention : Theme.accent)
+                        .frame(width: 32, height: 32).background((course.kind == .quickCram ? Theme.attention : Theme.accent).opacity(0.12), in: RoundedRectangle(cornerRadius: Theme.Radius.control)).accessibilityHidden(true)
+                    Text(course.name).font(Theme.cardTitle).lineLimit(1)
+                    Spacer(minLength: 0)
+                }
+                if let n = next, let d = n.deadline {
+                    let days = Calendar.current.dateComponents([.day], from: Calendar.current.startOfDay(for: Date()), to: Calendar.current.startOfDay(for: d)).day ?? 0
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(n.name).font(.system(.callout, design: .rounded, weight: .medium)).lineLimit(1)
+                        Text(days == 0 ? "Today" : days == 1 ? "Tomorrow" : "In \(days) days · " + d.formatted(date: .abbreviated, time: .omitted)).font(Theme.meta).foregroundStyle(days <= 3 ? Theme.attention : Theme.textSecondary)
+                    }
+                } else { Text("No upcoming assessment").font(.callout).foregroundStyle(Theme.textSecondary) }
+                Divider()
+                HStack(spacing: Theme.Space.lg) {
+                    stat(questions, "questions"); stat(materials, "materials")
+                    Spacer(minLength: 0)
+                }
+            }
+            .padding(Theme.Space.lg).frame(maxWidth: .infinity, alignment: .leading)
+            .background(hover ? Theme.elevated.opacity(0.5) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card))
+            .overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(hover ? Theme.accent.opacity(0.5) : Theme.border))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.Radius.card))
+        }
+        .buttonStyle(.plain).onHover { hover = $0 }.motion(value: hover)
+        .accessibilityLabel("\(course.name), \(questions.map { "\($0) questions" } ?? ""), \(materials.map { "\($0) materials" } ?? "")")
+        .task(id: model.revision) {
+            var f = QuestionFilter(); f.courseId = course.id
+            questions = (try? model.questions?.list(f))?.count
+            materials = (try? model.documents?.documents(courseId: course.id))?.count
+            let now = Calendar.current.startOfDay(for: Date())
+            next = ((try? model.courses?.assessments(courseId: course.id)) ?? []).filter { ($0.deadline ?? .distantPast) >= now }.min { ($0.deadline ?? .distantFuture) < ($1.deadline ?? .distantFuture) }
+        }
+    }
+    private func stat(_ n: Int?, _ label: String) -> some View {
+        HStack(spacing: 4) { Text(n.map(String.init) ?? "–").font(.system(.callout, design: .rounded, weight: .semibold)).monospacedDigit(); Text(label).font(Theme.meta).foregroundStyle(Theme.textSecondary) }
     }
 }

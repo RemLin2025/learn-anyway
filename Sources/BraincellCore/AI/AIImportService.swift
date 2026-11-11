@@ -141,13 +141,37 @@ extension AITaskService {
         (try? JSONEncoder().encode(v)).flatMap { String(data: $0, encoding: .utf8) } ?? "[]"
     }
 
-    /// Accepts bare JSON, a ```json fence, or JSON embedded in prose.
+    /// Accepts bare JSON, a ```json fence, or JSON embedded in prose. Models often write LaTeX with single backslashes inside JSON strings
+    /// (`"\\frac"`), which is invalid or silently becomes a form feed; those are repaired deterministically (see `repairLatexEscapes`).
     static func parse(_ raw: String) -> Any? {
         let t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        if let d = t.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) { return o }
-        guard let s = t.firstIndex(of: "{"), let e = t.lastIndex(of: "}"), s < e,
-              let d = String(t[s...e]).data(using: .utf8) else { return nil }
-        return try? JSONSerialization.jsonObject(with: d)
+        func attempt(_ text: String) -> Any? {
+            if let d = text.data(using: .utf8), let o = try? JSONSerialization.jsonObject(with: d) { return o }
+            guard let s = text.firstIndex(of: "{"), let e = text.lastIndex(of: "}"), s < e, let d = String(text[s...e]).data(using: .utf8) else { return nil }
+            return try? JSONSerialization.jsonObject(with: d)
+        }
+        if let o = attempt(t), !hasMangledEscapes(o) { return o }
+        return attempt(repairLatexEscapes(t)) ?? attempt(t)
+    }
+
+    /// A parsed string containing a form feed or backspace is almost certainly `\frac` / `\beta` that lost its backslash to a JSON escape.
+    static func hasMangledEscapes(_ o: Any) -> Bool {
+        switch o {
+        case let s as String: return s.contains("\u{0C}") || s.contains("\u{08}")
+        case let a as [Any]: return a.contains { hasMangledEscapes($0) }
+        case let d as [String: Any]: return d.values.contains { hasMangledEscapes($0) }
+        default: return false
+        }
+    }
+
+    /// Doubles backslashes that start a known LaTeX command or an invalid JSON escape (`\(`, `\[`, `\sigma`), leaving real JSON escapes
+    /// (`\n`, `\"`, `\\`, `\uXXXX`) and already-doubled backslashes alone. Formula text is otherwise untouched.
+    static func repairLatexEscapes(_ s: String) -> String {
+        let commands = "frac|tfrac|beta|bar|begin|binom|boldsymbol|bigg?|theta|text|times|tau|to|tilde|neq|nabla|notin|nu(?![a-z])|rho|right|rightarrow|rangle|forall|vec|tan|tanh|bmod|bullet|ne|nexists"
+        var out = s
+        out = out.replacingOccurrences(of: "(?<!\\\\)\\\\(?=(\(commands))\\b)", with: "\\\\\\\\", options: .regularExpression)
+        out = out.replacingOccurrences(of: "(?<!\\\\)\\\\(?![\"\\\\/bfnrt]|u[0-9a-fA-F]{4})", with: "\\\\\\\\", options: .regularExpression)
+        return out
     }
 
     static func parseFailureDetail(_ raw: String) -> String {

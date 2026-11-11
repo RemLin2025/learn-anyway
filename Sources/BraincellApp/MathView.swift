@@ -60,6 +60,25 @@ struct MathNodeView: View {
             }
         case .delimited(let l, let x, let r):
             HStack(spacing: 1) { Text(l).font(.system(size: size * 1.3, design: .serif)); MathNodeView(node: x, size: size); Text(r).font(.system(size: size * 1.3, design: .serif)) }
+        case .matrix(let rows, let l, let r):
+            HStack(spacing: 2) {
+                if !l.isEmpty { Text(l).font(.system(size: size * Double(max(1.4, Double(rows.count) * 1.1)), design: .serif)) }
+                Grid(horizontalSpacing: size * 0.8, verticalSpacing: size * 0.2) {
+                    ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                        GridRow { ForEach(Array(row.enumerated()), id: \.offset) { MathNodeView(node: $1, size: size) } }
+                    }
+                }
+                if !r.isEmpty { Text(r).font(.system(size: size * Double(max(1.4, Double(rows.count) * 1.1)), design: .serif)) }
+            }
+        case .accent(let a, let x):
+            if case .symbol(let t) = x, t.count == 1 { Text(t + a).font(.system(size: size, design: .serif)).italic() }
+            else { VStack(spacing: 0) { MathNodeView(node: x, size: size).padding(.top, 3).overlay(alignment: .top) { Rectangle().frame(height: 1) } } }   // a container is required: a bare recursive branch makes SwiftUI recurse forever
+        case .aligned(let rows):
+            Grid(alignment: .leading, horizontalSpacing: 4, verticalSpacing: size * 0.25) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    GridRow { ForEach(Array(row.enumerated()), id: \.offset) { c, n in MathNodeView(node: n, size: size).gridColumnAlignment(c == 0 ? .trailing : .leading) } }
+                }
+            }
         case .space: Color.clear.frame(width: size * 0.3, height: 1)
         }
     }
@@ -72,22 +91,11 @@ struct MathNodeView: View {
     }
 }
 
-/// Markdown text with inline `$…$` math approximated in Unicode (so it wraps naturally) and `$$…$$` blocks
-/// typeset with `MathView`. Links are inert and only inline Markdown is interpreted: content is untrusted.
+/// Compatibility wrapper: every call site gets the full math-aware renderer.
 struct RichText: View {
     let text: String
     var font: Font = .body
-
-    var body: some View {
-        let parts = text.components(separatedBy: "$$")
-        VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(parts.enumerated()), id: \.offset) { i, part in
-                if i % 2 == 1 && i < parts.count - 1 { MathView(latex: part.trimmingCharacters(in: .whitespacesAndNewlines)).padding(.vertical, 4) }
-                else if !part.isEmpty { Text(Self.attributed(i % 2 == 1 ? "$$" + part : part)).font(font).textSelection(.enabled).fixedSize(horizontal: false, vertical: true) }
-            }
-        }
-        .environment(\.openURL, OpenURLAction { _ in .discarded })
-    }
+    var body: some View { MathContentView(text: text) }
 
     static func attributed(_ s: String) -> AttributedString {
         let converted = Latex.inlineConverted(s)
