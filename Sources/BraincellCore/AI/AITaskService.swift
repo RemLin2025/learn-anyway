@@ -112,7 +112,13 @@ public struct AITaskService: Sendable {
     }
 
     func buildPlan(task: AITask, scope: AssessmentService.Scope) throws {
-        let params = self.params(of: task)
+        try GenerationPlanStore(db: db).save(try makePlan(courseId: task.courseId, assessmentId: task.assessmentId, params: self.params(of: task), scope: scope), taskId: task.id)
+    }
+
+    /// The plan for a generation request, without creating a task. Practice sets use it to decide which slots reuse existing questions.
+    func makePlan(courseId: UUID, assessmentId: UUID?, params: GenerationParams, scope: AssessmentService.Scope) throws -> GenerationPlan {
+        struct T { var courseId: UUID; var assessmentId: UUID? }
+        let task = T(courseId: courseId, assessmentId: assessmentId)
         let skills = try db.read { d in try Skill.fetchAll(d, keys: params.skillIds).filter { $0.archivedAt == nil } }
         let counts: [UUID: Int] = try db.read { d in
             Dictionary(uniqueKeysWithValues: try Row.fetchAll(d, sql: "SELECT skillId, COUNT(*) c FROM question_skills qs JOIN questions q ON q.id = qs.questionId WHERE q.archivedAt IS NULL AND q.courseId = ? GROUP BY skillId", arguments: [task.courseId]).map { ($0["skillId"] as UUID, $0["c"] as Int) })
@@ -125,18 +131,23 @@ public struct AITaskService: Sendable {
         let profile = (mode == .matchInstructorStyle || mode == .similarReasoning) ? try svc.profile(courseId: task.courseId, assessmentId: task.assessmentId) : nil
         let cfg = try task.assessmentId.map { try svc.config(assessmentId: $0) } ?? AssessmentConfig()
         var plan = GenerationPlanner.plan(mode: mode, count: params.count, topics: skills.map { .init(name: $0.name, existingCount: counts[$0.id] ?? 0, weak: weak.contains($0.normalizedName)) },
-                                          sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames)
+                                          sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames,
+                                          archetypes: try ArchetypeLibrary(db: db).archetypes(courseId: task.courseId, excluding: scope.excludedNames))
         plan.limitations += scope.limitations
-        try GenerationPlanStore(db: db).save(plan, taskId: task.id)
+        return plan
     }
 
     @discardableResult
     func insertGenerationTask(courseId: UUID, assessmentId: UUID?, params: GenerationParams) throws -> AITask {
+        try db.write { try Self.insertGenerationTask($0, courseId: courseId, assessmentId: assessmentId, params: params) }
+    }
+
+    static func insertGenerationTask(_ d: Database, courseId: UUID, assessmentId: UUID?, params: GenerationParams) throws -> AITask {
         guard (1...200).contains(params.count) else { throw AITaskError.invalidParams("Ask for between 1 and 200 questions.") }
         guard 1 <= params.minDifficulty, params.minDifficulty <= params.maxDifficulty, params.maxDifficulty <= 5 else {
             throw AITaskError.invalidParams("Difficulty must be within 1–5.")
         }
-        return try db.write { d in
+        do {
             guard let course = try Course.fetchOne(d, key: courseId) else { throw AITaskError.notFound }
             var p = params
             if let a = assessmentId, try Assessment.fetchOne(d, key: a)?.courseId != courseId { throw AITaskError.invalidParams("That assessment belongs to another course.") }
@@ -234,12 +245,32 @@ public struct AITaskService: Sendable {
                 let start = try Int.fetchOne(d, sql: "SELECT COALESCE(SUM(expectedCount), 0) FROM ai_task_batches WHERE taskId = ? AND kind = 'generate' AND ordinal < ?", arguments: [b.taskId, b.ordinal]) ?? 0
                 slots = Array(plan.slots.dropFirst(start).prefix(b.expectedCount))
             } else if plan != nil, b.kind == .continue { slots = Array(try GenerationPlanStore.unmet(d, taskId: task.id).prefix(b.expectedCount)) }
-            var docsForExtract: [(title: String, chunks: [DocumentChunk])] = []
-            for docId in params.documentIds {
-                guard let doc = try Document.fetchOne(d, key: docId), doc.courseId == task.courseId else { continue }
-                docsForExtract.append((doc.title, try DocumentChunk.filter(Column("documentId") == docId && Column("isLowContent") == false).order(Column("ordinal")).fetchAll(d)))
+            var docIds = params.documentIds
+            var linked = Set<UUID>()
+            var svcCfg = AssessmentConfig()
+            if let aid = task.assessmentId {
+                linked = Set(try UUID.fetchAll(d, sql: "SELECT documentId FROM document_assessments WHERE assessmentId = ?", arguments: [aid]))
+                if docIds.isEmpty { docIds = Array(linked) }                       // the assessment's own materials, when none were picked
+                svcCfg = try String.fetchOne(d, sql: "SELECT configJSON FROM assessment_config WHERE assessmentId = ?", arguments: [aid]).flatMap { try? JSONDecoder().decode(AssessmentConfig.self, from: Data($0.utf8)) } ?? AssessmentConfig()
             }
-            let selected = ExtractSelector.select(docsForExtract, queries: slots.map(\.topic) + skills + [assessment?.name ?? ""], budget: PromptBuilder.extractBudget)
+            var docsForExtract: [(title: String, chunks: [DocumentChunk])] = []
+            var selDocs: [AssessmentSelector.Doc] = []
+            for docId in docIds {
+                guard let doc = try Document.fetchOne(d, key: docId), doc.courseId == task.courseId else { continue }
+                let chunks = try DocumentChunk.filter(Column("documentId") == docId && Column("isLowContent") == false).order(Column("ordinal")).fetchAll(d)
+                docsForExtract.append((doc.title, chunks)); selDocs.append(.init(id: doc.id, title: doc.title, chunks: chunks, linked: linked.contains(doc.id)))
+            }
+            var selected: (extracts: [PromptInput.Extract], truncated: Set<String>)
+            if let asm = assessment {
+                let sources = try SourceAnalysisService.sourceQuestions(d, courseId: task.courseId, documentIds: Set(docIds))
+                let r = AssessmentSelector.select(.init(docs: selDocs, includes: svcCfg.scopeIncludes, includeBasis: svcCfg.basis["scopeIncludes"] ?? .userProvided, excludes: svcCfg.scopeExcludes,
+                                                        topics: slots.map(\.topic) + skills, sources: sources, assessmentName: asm.name), budget: PromptBuilder.extractBudget)
+                selected = (r.extracts, r.truncated)
+                let json = String(data: try JSONEncoder().encode(SelectionLog(records: r.records, skipped: r.skipped, limitations: r.limitations)), encoding: .utf8) ?? "{}"
+                try d.execute(sql: "INSERT INTO extract_selections (batchId, logJSON, updatedAt) VALUES (?,?,?) ON CONFLICT(batchId) DO UPDATE SET logJSON = excluded.logJSON, updatedAt = excluded.updatedAt", arguments: [b.id, json, Date()])
+            } else {
+                selected = ExtractSelector.select(docsForExtract, queries: slots.map(\.topic) + skills + [""], budget: PromptBuilder.extractBudget)
+            }
             let extracts = selected.extracts, truncated = selected.truncated
 
             var input = PromptInput(kind: b.kind, requestId: b.requestId, count: b.expectedCount, params: params,
@@ -265,6 +296,11 @@ public struct AITaskService: Sendable {
             try b.update(d)
             return pkg
         }
+    }
+
+    /// Why each passage was sent with a request (or left out), as recorded when the request was prepared.
+    public func selectionLog(batchId: UUID) throws -> SelectionLog? {
+        try db.read { try String.fetchOne($0, sql: "SELECT logJSON FROM extract_selections WHERE batchId = ?", arguments: [batchId]) }.flatMap { try? JSONDecoder().decode(SelectionLog.self, from: Data($0.utf8)) }
     }
 
     /// Called only after the user explicitly copied or exported the request.

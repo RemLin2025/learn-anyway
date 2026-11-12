@@ -72,7 +72,7 @@ struct NameSheet: View {
 }
 
 struct CourseDetailView: View {
-    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials" }
+    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials", templates = "Templates" }
 
     @EnvironmentObject var model: AppModel
     let course: Course
@@ -115,10 +115,12 @@ struct CourseDetailView: View {
                 case .assessments: AssessmentsTab(course: course)
                 case .topics: TopicsTab(course: course)
                 case .materials: MaterialsTab(course: course)
+                case .templates: TemplateGalleryView(course: course)
                 }
             }
         }
         .onAppear { if SnapshotRunner.isActive, model.snapshotCourseTab == "materials" { tab = .materials } }
+        .onChange(of: model.courseTabRequest) { _, r in if let r, let t = Tab.allCases.first(where: { $0.rawValue.lowercased() == r }) { tab = t; model.courseTabRequest = nil } }
         .sheet(isPresented: $showRename) { NameSheet(title: "Rename Course", prompt: "Course name", text: $renameText, confirm: "Rename") { model.perform { try model.courses?.renameCourse(course.id, to: renameText) } } }
         .sheet(isPresented: $showConvert) {
             NameSheet(title: "Convert to Course", prompt: "Course name", text: $convertName, confirm: "Convert") {
@@ -167,7 +169,9 @@ struct AssessmentsTab: View {
             .sidePanel().listPaneWidth()
 
             Group {
-                if let a = assessments.first(where: { $0.id == selected }) { scopeEditor(a) }
+                if let a = assessments.first(where: { $0.id == selected }) {
+                    VStack(spacing: 0) { scopeEditor(a); Divider(); PracticeSetsSection(course: course, assessment: a).frame(minHeight: 200, maxHeight: 300) }
+                }
                 else { EmptyStateView(symbol: "checklist", title: "Select an assessment", message: "Choose which topics it covers.") }
             }.frame(minWidth: 260)
         }
