@@ -923,6 +923,17 @@ public final class AppDatabase: Sendable {
             }
             try db.create(index: "worksheet_annotations_on_sheet", on: "worksheet_annotations", columns: ["worksheetId", "page"])
         }
+        m.registerMigration("v22_question_tutor") { db in
+            try db.create(table: "question_tutor_messages") { t in      // one short conversation per attempt; additive, nothing else changes
+                t.primaryKey("id", .blob)
+                t.column("attemptId", .blob).notNull()
+                t.column("questionId", .blob).notNull()
+                t.column("role", .text).notNull()
+                t.column("content", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(index: "question_tutor_messages_on_attempt", on: "question_tutor_messages", columns: ["attemptId", "createdAt"])
+        }
         return m
     }
 

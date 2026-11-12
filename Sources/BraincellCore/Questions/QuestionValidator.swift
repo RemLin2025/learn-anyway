@@ -252,7 +252,8 @@ public enum QuestionValidator {
                 }
                 let choices = arr.compactMap { c -> Choice? in
                     guard let id = c["id"] as? String, !id.isEmpty, let t = c["text"] as? String, !t.isEmpty, t.count <= 2_000 else { return nil }
-                    return Choice(id: id, text: t) }
+                    let why = (c["why"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    return Choice(id: id, text: t, why: why?.isEmpty == false ? String(why!.prefix(1_200)) : nil) }
                 guard choices.count == arr.count else { block("\(path).choices", "each choice needs a non-empty id and text"); return (nil, false) }
                 guard Set(choices.map(\.id)).count == choices.count else { block("\(path).choices", "choice ids must be unique"); return (nil, false) }
                 guard let ids = d["correctIds"] as? [String], !ids.isEmpty, Set(ids).count == ids.count else {
@@ -263,7 +264,11 @@ public enum QuestionValidator {
                 }
                 if type == .singleChoice, ids.count != 1 { block("\(path).correctIds", "single_choice needs exactly one correct id"); return (nil, false) }
                 if type == .multipleSelect, ids.count == choices.count { review("\(path).correctIds", "every option is marked correct; check this is intended") }
-                a.choices = choices; a.correctIds = ids
+                // Per-option explanations are all-or-nothing: a partial set would leave some options looking unexplained, so it is dropped (the solution still shows).
+                let explained = choices.filter { $0.why != nil }.count
+                if explained != 0, explained != choices.count { a.choices = choices.map { var c = $0; c.why = nil; return c } }
+                else { a.choices = choices }
+                a.correctIds = ids
                 if verifiedChoice(&a, d, path, type: type) { verified = true }
             case .shortAnswer, .codeTracing:
                 if method == .symbolic {

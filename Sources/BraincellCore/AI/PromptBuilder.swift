@@ -186,7 +186,7 @@ enum PromptBuilder {
 
         ## `answer` and `evaluation` by type
         - flashcard: answer {"back":[blocks]}; evaluation {"method":"self_review"}
-        - single_choice: answer {"choices":[{"id":"a","text":"…"},…],"correctIds":["a"]} (2–6 choices, exactly one correct); evaluation {"method":"choice"}
+        - single_choice: answer {"choices":[{"id":"a","text":"…","why":"one or two sentences on the actual reason this option is right or wrong (type, syntax, method or concept); never just 'incorrect'"},…],"correctIds":["a"]} — give "why" for EVERY choice or for none (2–6 choices, exactly one correct); evaluation {"method":"choice"}
         - multiple_select: same, `correctIds` lists every correct id; evaluation {"method":"choice"}
         - short_answer: answer {"accepted":["…"],"caseSensitive":false}; evaluation {"method":"exact"} (or "self_review"). For an algebraic answer use answer {"expression":"(x+1)^2"}; evaluation {"method":"symbolic"} (polynomials/fractions with + - * / ^ and integer powers only; no functions, roots or pi)
         - numeric: answer {"value":12.5,"tolerance":0.01,"unit":"","verificationExpression":"25/2"}; evaluation {"method":"numeric"}. `verificationExpression` is optional arithmetic (numbers, + - * / ^, parentheses, pi) that re-derives `value`.
