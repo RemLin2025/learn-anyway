@@ -85,25 +85,68 @@ public final class SourceAnalysisService: @unchecked Sendable {
     /// Analyzes one document. Reuses a complete analysis for the same content, analyzer version and configuration without calling a model;
     /// resumes unfinished windows otherwise. A changed document gets a new analysis and the old one is marked stale.
     public func analyze(_ doc: Document, label: String = "Source Summarization") async throws -> AnalysisOutcome {
-        // Concurrent callers for the same content join one run instead of sending every window twice.
+        // Concurrent callers for the same content share one run; the run is cancelled only when every caller has gone.
         let key = "\(doc.id)|\(doc.sha256)"
-        let (task, owner): (Task<AnalysisOutcome, Error>, Bool) = Self.inflight.withLock { m in
-            if let t = m[key] { return (t, false) }
-            let t = Task { try await self.analyzeUncoalesced(doc) }; m[key] = t; return (t, true)
-        }
-        if owner { defer { Self.inflight.withLock { $0[key] = nil } } ; return try await task.value }
-        return try await task.value
+        return try await Self.inflight.join(key) { try await self.analyzeUncoalesced(doc) }
     }
     private static let inflight = InFlight()
-    final class InFlight: @unchecked Sendable { private let l = NSLock(); private var m: [String: Task<AnalysisOutcome, Error>] = [:]; func withLock<R>(_ f: (inout [String: Task<AnalysisOutcome, Error>]) -> R) -> R { l.withLock { f(&m) } } }
+
+    final class InFlight: @unchecked Sendable {
+        final class Run { var task: Task<Void, Never>?; var waiters: [UUID: CheckedContinuation<AnalysisOutcome, Error>] = [:]; var gone: Set<UUID> = []; var result: Result<AnalysisOutcome, Error>? }
+        private let l = NSLock(); private var runs: [String: Run] = [:]
+
+        func join(_ key: String, _ work: @escaping @Sendable () async throws -> AnalysisOutcome) async throws -> AnalysisOutcome {
+            let id = UUID()
+            let run: Run = l.withLock {
+                if let r = runs[key] { return r }
+                let r = Run(); runs[key] = r
+                r.task = Task { [self] in
+                    let res: Result<AnalysisOutcome, Error>
+                    do { res = .success(try await work()) } catch { res = .failure(error) }
+                    finish(key, r, res)
+                }
+                return r
+            }
+            return try await withTaskCancellationHandler {
+                try await withCheckedThrowingContinuation { (c: CheckedContinuation<AnalysisOutcome, Error>) in
+                    l.withLock {
+                        if let res = run.result { c.resume(with: res) }
+                        else if run.gone.contains(id) { c.resume(throwing: CancellationError()); abandonIfEmpty(key, run) }
+                        else { run.waiters[id] = c }
+                    }
+                }
+            } onCancel: {
+                l.withLock {
+                    if let c = run.waiters.removeValue(forKey: id) { c.resume(throwing: CancellationError()); abandonIfEmpty(key, run) }
+                    else { run.gone.insert(id) }
+                }
+            }
+        }
+        // Caller holds the lock. A run nobody awaits is cancelled and unregistered at once, so a later caller starts a fresh run
+        // (finished windows are already stored; an interrupted window is simply sent again).
+        private func abandonIfEmpty(_ key: String, _ run: Run) {
+            guard run.waiters.isEmpty, run.result == nil else { return }
+            if runs[key] === run { runs[key] = nil }
+            run.task?.cancel()
+        }
+        private func finish(_ key: String, _ run: Run, _ res: Result<AnalysisOutcome, Error>) {
+            let ws: [CheckedContinuation<AnalysisOutcome, Error>] = l.withLock {
+                run.result = res; if runs[key] === run { runs[key] = nil }
+                defer { run.waiters = [:] }; return Array(run.waiters.values)
+            }
+            ws.forEach { $0.resume(with: res) }
+        }
+    }
 
     func analyzeUncoalesced(_ doc: Document) async throws -> AnalysisOutcome {
         let chunks = try db.read { try DocumentChunk.filter(Column("documentId") == doc.id && Column("isLowContent") == false).order(Column("ordinal")).fetchAll($0) }
         guard !chunks.isEmpty else { throw AnalysisError.unavailable("“\(doc.title)” has no readable text to analyze. OCR is not available, so scanned pages are skipped.") }
-        let cfg = Self.configHash()
+        // Window boundaries are chunk positions, so the analysis identity includes the chunk layout: the same file re-extracted into
+        // different chunks is a new analysis, never a resume against indices that no longer line up.
+        let cfg = QuestionHashing.sha256(Self.configHash() + "|" + chunks.map { QuestionHashing.sha256($0.text) }.joined(separator: ","))
         let wins = Self.windows(chunks.map { $0.text.count })
         let analysisId: UUID = try db.write { d in
-            try d.execute(sql: "UPDATE source_analyses SET status = 'stale' WHERE documentId = ? AND documentSha != ? AND status != 'stale'", arguments: [doc.id, doc.sha256])
+            try d.execute(sql: "UPDATE source_analyses SET status = 'stale' WHERE documentId = ? AND (documentSha != ? OR configHash != ?) AND status != 'stale'", arguments: [doc.id, doc.sha256, cfg])
             if let ex = try Row.fetchOne(d, sql: "SELECT id, status FROM source_analyses WHERE documentId = ? AND documentSha = ? AND analyzerVersion = ? AND configHash = ?", arguments: [doc.id, doc.sha256, Self.version, cfg]) {
                 let id: UUID = ex["id"]
                 // Content reverted to an earlier version: bring that analysis back instead of leaving it hidden as stale.
@@ -132,6 +175,11 @@ public final class SourceAnalysisService: @unchecked Sendable {
             let status: String = w["status"]; let wid: UUID = w["id"]
             if status == "done" { continue }
             let from: Int = w["chunkFrom"], to: Int = w["chunkTo"], requestId: String = w["requestId"]
+            guard from >= 0, from <= to, to < chunks.count else {      // never skip silently: the window is reported as failed
+                failed += 1
+                try db.write { try $0.execute(sql: "UPDATE source_analysis_windows SET status = 'failed', error = 'chunk range no longer exists; re-run after re-extraction' WHERE id = ?", arguments: [wid]) }
+                continue
+            }
             let prompt = Self.prompt(doc: doc, chunks: Array(chunks[from...to]), requestId: requestId)
             try db.write { try $0.execute(sql: "UPDATE source_analysis_windows SET requestText = ? WHERE id = ?", arguments: [prompt, wid]) }
             if manual || gateway == nil {
