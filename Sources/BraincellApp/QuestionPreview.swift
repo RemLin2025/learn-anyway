@@ -27,10 +27,10 @@ struct BlockView: View {
             DisplayMath(latex: block.latex ?? "", boxed: MathMarkdown.shouldBox(block.latex ?? ""), size: 22)
         case .table:
             Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 4) {
-                GridRow { ForEach(Array((block.headers ?? []).enumerated()), id: \.offset) { Text($1).font(.headline) } }
+                GridRow { ForEach(Array((block.headers ?? []).enumerated()), id: \.offset) { InlineContent(inlines: MathMarkdown.inline($1), size: 17, weight: .semibold) } }
                 Divider()
                 ForEach(Array((block.rows ?? []).enumerated()), id: \.offset) { _, row in
-                    GridRow { ForEach(Array(row.enumerated()), id: \.offset) { Text($1) } }
+                    GridRow { ForEach(Array(row.enumerated()), id: \.offset) { InlineContent(inlines: MathMarkdown.inline($1), size: 16) } }
                 }
             }
         case .image:
