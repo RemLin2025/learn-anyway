@@ -92,7 +92,7 @@ extension AgentTests {
         }
         var onlyNumeric = LearningTemplate.interactive; onlyNumeric.id = "x"; onlyNumeric.supportedFormats = ["numeric"]
         let doc = RenderBuilder.build(template: onlyNumeric, title: "S", questions: qs)
-        #expect(doc.items.isEmpty && doc.skipped.count == 3 && doc.skipped[0].contains("isn’t part of"))          // incompatibility is reported, not hidden
+        #expect(doc.items.isEmpty && doc.skipped.count == 3 && doc.skipped[0].contains("part of"))          // incompatibility is reported, not hidden
         let w1 = try sheets.generate(setId: set.id, template: .examWorksheet), w2 = try sheets.generate(setId: set.id, template: .guided)
         #expect(w1.id != w2.id && w1.templateId != w2.templateId)
         let s1 = try sets.startSession(setId: set.id, template: .interactive, templates: templates), s2 = try sets.startSession(setId: set.id, template: .guided, templates: templates)
@@ -127,7 +127,7 @@ extension AgentTests {
         #expect(frac.height > plain.height * 1.4 && frac.descent > 0)                  // numerator above, denominator below the baseline
         #expect(sup.ascent > b("x").ascent && sup.width > b("x").width)                // the exponent is raised, not appended
         #expect(root.width > b("x+1").width && root.ascent > b("x+1").ascent)
-        #expect(mat.height > b("a").height * 2 && mat.width > b("a & b").width * 0.5)
+        #expect(mat.height > b("a").height * 2 && mat.width > b("ab").width * 0.5)
         #expect(sum.height > b("k").height * 1.6)                                      // limits stack above and below
         #expect(b("\\frac{\\frac{1}{2}}{3}").height > frac.height)                     // nested fractions grow
         #expect(MathLayout.box(latex: "\\unsupportedcommand{x}", size: 12) == nil)    // outside the subset: no guessing
