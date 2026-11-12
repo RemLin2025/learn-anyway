@@ -104,3 +104,24 @@ extension AgentTests {
         #expect(failed >= 1)
     }
 }
+
+extension AgentTests {
+    /// Analyses made before the chunk layout joined the cache key are adopted when provably identical, and redone when not.
+    @Test func legacyAnalysesAreReusedOnlyWhenTheirStoredRequestsMatchTheCurrentText() async throws {
+        let calls = LockedBox<Int>(0)
+        let (e, _, d) = try await bankEnv(chunks: Self.bigChunks) { _, _ in calls.withLock { $0 += 1 }; return self.analysisJSON([Self.srcQ("Q1")]) }
+        let svc = SourceAnalysisService(db: e.db, gateway: e.ctx.gateway)
+        guard case .analyzed(let id) = try await svc.analyze(d) else { Issue.record("first run"); return }
+        let n = calls.value
+        // pretend it was created by the previous version: bare config hash
+        try e.db.write { try $0.execute(sql: "UPDATE source_analyses SET configHash = ? WHERE id = ?", arguments: [SourceAnalysisService.configHash(), id]) }
+        #expect(try await svc.analyze(d) == .cached(id) && calls.value == n)                  // identical text: adopted, no model call
+        // same hash and window plan, but the extracted text differs: not provably the same work, so it is analyzed again
+        try e.db.write {
+            try $0.execute(sql: "UPDATE source_analyses SET configHash = ? WHERE id = ?", arguments: [SourceAnalysisService.configHash(), id])
+            try $0.execute(sql: "UPDATE document_chunks SET text = text || ' (re-extracted)' WHERE documentId = ? AND ordinal = 0", arguments: [d.id])
+        }
+        guard case .analyzed(let id2) = try await svc.analyze(d) else { Issue.record("expected a new analysis"); return }
+        #expect(id2 != id && calls.value > n)
+    }
+}

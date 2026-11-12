@@ -11,6 +11,7 @@ public struct PlanSlot: Codable, Equatable, Sendable, Identifiable {
     public var exemplars: [SourceQuestionRef]
     public var exemplarSummary: String?             // a compact description of the source technique (not the source text)
     public var rationale: String
+    public var archetypeKey: String? = nil          // the reusable course-level archetype this slot follows (nil for plans made before archetypes existed)
 }
 
 public struct GenerationPlan: Codable, Equatable, Sendable {
@@ -40,7 +41,7 @@ public enum GenerationPlanner {
         return out
     }
 
-    public static func plan(mode: GenerationMode, count: Int, topics: [TopicInput], sources: [SourceQuestionRow], profile: StyleProfile?, config: AssessmentConfig, excluded: [String]) -> GenerationPlan {
+    public static func plan(mode: GenerationMode, count: Int, topics: [TopicInput], sources: [SourceQuestionRow], profile: StyleProfile?, config: AssessmentConfig, excluded: [String], archetypes: [ArchetypeModel] = []) -> GenerationPlan {
         var limitations: [String] = []
         var pool = topics.sorted { ($0.existingCount, $0.name) < ($1.existingCount, $1.name) }       // least-covered first
         if mode == .weakSkills {
@@ -106,6 +107,13 @@ public enum GenerationPlanner {
                                       exemplars: e, exemplarSummary: sum, rationale: mode == .weakSkills ? "Targets a weaker topic." : "Covers the least-practised topics with varied reasoning demands."))
             }
         }
+        // Slots follow the aggregated course-level archetype (merged method, constraints, mistakes) instead of one source question's description.
+        let byKey = Dictionary(archetypes.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        for i in slots.indices {
+            guard let sid = slots[i].exemplars.first?.sourceQuestionId, let r = sources.first(where: { $0.id.uuidString == sid }), let a = byKey[ArchetypeLibrary.key(for: r.payload)] else { continue }
+            slots[i].archetypeKey = a.key; slots[i].exemplarSummary = ArchetypeLibrary.summary(a)
+            slots[i].exemplars = [slots[i].exemplars[0]] + a.sources.filter { $0.sourceQuestionId != sid }.prefix(2)
+        }
         return GenerationPlan(mode: mode, slots: slots, excludedTopics: excluded, limitations: limitations, styleUsed: mode == .matchInstructorStyle && styleOK,
                               weakTargets: mode == .weakSkills ? pool.filter(\.weak).map(\.name) : [])
     }
@@ -124,9 +132,10 @@ public final class GenerationPlanStore: @unchecked Sendable {
         return p.slots.filter { !met.contains($0.id) }
     }
 
-    public func save(_ p: GenerationPlan, taskId: UUID) throws {
+    public func save(_ p: GenerationPlan, taskId: UUID) throws { try db.write { try Self.save($0, p, taskId: taskId) } }
+    static func save(_ d: Database, _ p: GenerationPlan, taskId: UUID) throws {
         let json = String(data: try JSONEncoder().encode(p), encoding: .utf8) ?? "{}"
-        try db.write { try $0.execute(sql: "INSERT OR REPLACE INTO generation_plans (taskId, mode, planJSON, createdAt) VALUES (?,?,?,?)", arguments: [taskId, p.mode.rawValue, json, Date()]) }
+        try d.execute(sql: "INSERT OR REPLACE INTO generation_plans (taskId, mode, planJSON, createdAt) VALUES (?,?,?,?)", arguments: [taskId, p.mode.rawValue, json, Date()])
     }
     public func load(taskId: UUID) throws -> GenerationPlan? {
         try db.read { try String.fetchOne($0, sql: "SELECT planJSON FROM generation_plans WHERE taskId = ?", arguments: [taskId]) }.flatMap { try? JSONDecoder().decode(GenerationPlan.self, from: Data($0.utf8)) }

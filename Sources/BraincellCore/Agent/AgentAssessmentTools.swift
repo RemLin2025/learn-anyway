@@ -6,6 +6,9 @@ extension AgentRegistry {
         ToolSpec(name: "sources.analyze", summary: "Analyze a course's instructor practice questions and worked solutions (once per unchanged file; cached). Extracts each question with its solution method, archetype and difficulty so generated practice can follow the instructor's reasoning. Reports completeness and limitations honestly.",
                  params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("document", "string", "File name or id (optional: all readable files)")], permission: .write, approval: false,
                  describe: { a, _ in "Analyze practice questions in \(a.string("course") ?? "the course")" }, run: analyzeSources),
+        ToolSpec(name: "archetypes.list", summary: "List the course's reusable problem archetypes (built once from analyzed material, cached): reasoning steps, formulas, answer format, difficulty, common mistakes, variation constraints, source references, confidence and verification status. Use this instead of re-analyzing material.",
+                 params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("topic", "string", "Only archetypes touching this topic (optional)")], permission: .read, approval: false,
+                 describe: { a, _ in "Look up problem archetypes for \(a.string("course") ?? "the course")" }, run: listArchetypes),
         ToolSpec(name: "style.profile", summary: "Show the detected assessment style profile for a course/assessment: question formats, reasoning archetypes, difficulty spread, rounding, coverage and limitations. Confirmed, inferred and user-provided facts are labelled.",
                  params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "Assessment (optional)")], permission: .read, approval: false,
                  describe: { _, _ in "Inspect the style profile" }, run: styleProfile),
@@ -30,7 +33,18 @@ extension AgentRegistry {
             switch outcome { case .cached: state = "reused cached analysis"; case .analyzed: state = "analyzed"; case .partial(_, let f): state = "partly analyzed (\(f) window(s) failed; run again to resume)"; case .awaitingImport: state = "waiting for you to paste the reply (manual bridge)" }
             lines.append("- \(d.name): \(state); \(s?.questions ?? 0) question(s), \(s?.completeQuestions ?? 0) complete; windows \(s?.windowsDone ?? 0)/\(s?.windowsTotal ?? 0)" + ((s?.limitations.isEmpty ?? true) ? "" : ". Limitations: \(s!.limitations)"))
         }
+        _ = try? ArchetypeLibrary(db: c.db).rebuildIfNeeded(courseId: course.id)
         return ToolOutput(text: "Source analysis for \(course.name):\n" + lines.joined(separator: "\n") + "\nA bank is only complete when every window is done and there are no limitations. Do not call a truncated or partial analysis complete.", summary: "\(docs.count) file(s) analyzed")
+    }
+
+    @Sendable static func listArchetypes(_ a: ToolArgs, _ c: AgentContext, _ info: ToolRunInfo) async throws -> ToolOutput {
+        let course = try c.course(try a.require("course"))
+        let ms = try ArchetypeLibrary(db: c.db).archetypes(courseId: course.id, topics: a.string("topic").map { [$0] })
+        guard !ms.isEmpty else { return ToolOutput(text: "No archetypes yet for \(course.name). Analyze the course's practice materials first (sources.analyze).", summary: "0 archetypes") }
+        let t = ms.prefix(15).map { m in
+            "- \(m.title) [\(m.key)]: topics \(m.topics.joined(separator: ", ")); \(m.steps.count) step(s); difficulty ~\(m.difficultyTypical) (\(m.difficultyMin)–\(m.difficultyMax)); format \(m.answerFormat.isEmpty ? "unknown" : m.answerFormat); \(m.sourceCount) source(s), \(m.completeCount) complete; confidence \(Int(m.confidence * 100))% (heuristic), \(m.verification)"
+        }.joined(separator: "\n")
+        return ToolOutput(text: "Archetypes for \(course.name) (inferred from instructor material, not exam weights):\n" + t, summary: "\(ms.count) archetypes")
     }
 
     @Sendable static func styleProfile(_ a: ToolArgs, _ c: AgentContext, _ info: ToolRunInfo) async throws -> ToolOutput {
