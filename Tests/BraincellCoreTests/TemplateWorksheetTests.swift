@@ -217,4 +217,17 @@ extension AgentTests {
         let fk = try db.read { try Row.fetchAll($0, sql: "PRAGMA foreign_key_check") }
         #expect(fk.isEmpty)
     }
+
+    @Test func galleryExamplesRenderUnderEveryBuiltInTemplateThroughTheRealPipeline() throws {
+        let qs = TemplateExamples.questions.map { (UUID(), $0, Optional("Topic")) }
+        for t in LearningTemplate.builtIns {
+            let doc = RenderBuilder.build(template: t, title: "Preview", questions: qs)
+            #expect(!doc.items.isEmpty, "\(t.name) has nothing to preview")
+            let url = try tempDir().appendingPathComponent("p.pdf")
+            #expect(try WorksheetRenderer.write(doc, to: url) >= 1)
+        }
+        let flash = RenderBuilder.build(template: .flashcards, title: "F", questions: qs)
+        #expect(flash.items.contains { $0.type == .flashcard } && flash.items.count == 4)
+        #expect(RenderBuilder.build(template: .guided, title: "G", questions: qs).items.first?.difficulty == 1 || RenderBuilder.build(template: .guided, title: "G", questions: qs).items.first?.type == .flashcard)
+    }
 }

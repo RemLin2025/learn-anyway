@@ -12,6 +12,8 @@ final class PracticeModel: ObservableObject {
     let sessionID: UUID
     let exams: ExamService
     /// Exam simulation: answers are saved as drafts only; no feedback, hints or score until the exam is submitted.
+    /// False when the template this session was started from turns hints off.
+    var hintsAllowed = true
     @Published var exam: ExamAttempt?
     @Published var examRemaining = 0
 
@@ -67,6 +69,7 @@ final class PracticeModel: ObservableObject {
             items = try svc.items(sessionId: sessionID)
             for it in items { specs[it.id] = try svc.spec(for: it) }
             paused = s.status == .paused
+            hintsAllowed = app.templates?.template(forSession: sessionID)?.hints.allowed ?? true
             if s.status == .completed { summary = try progSvc.sessionResults(sessionId: sessionID) }
             enter(min(s.currentOrdinal, max(0, items.count - 1)))
         } catch { fail(error) }
@@ -134,7 +137,7 @@ final class PracticeModel: ObservableObject {
     func go(_ delta: Int) { flush(); enter(index + delta) }
 
     func revealHint() {
-        guard let it = item, let s = spec, hintsUsed < s.hints.count, !locked, !examActive else { return }
+        guard hintsAllowed, let it = item, let s = spec, hintsUsed < s.hints.count, !locked, !examActive else { return }
         flush()
         do { try svc.revealHint(itemId: it.id, level: hintsUsed + 1); items = try svc.items(sessionId: sessionID) } catch { fail(error) }
     }

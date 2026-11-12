@@ -130,14 +130,16 @@ public final class WorksheetService: @unchecked Sendable {
         else { try Self.flatten(notes, from: doc, to: dest) }
     }
 
-    static func addLive(_ notes: [WorksheetAnnotation], to doc: PDFDocument) throws {
+    /// Marks annotations this app added (userName "LA:<id>"), so a view can replace exactly those when the stored annotations change.
+    public static let liveTag = "LA:"
+    public static func addLive(_ notes: [WorksheetAnnotation], to doc: PDFDocument) throws {
         for a in notes {
             guard let page = doc.page(at: a.page) else { continue }
             let box = page.bounds(for: .mediaBox)
             switch a.kind {
             case .text, .field:
                 let ann = PDFAnnotation(bounds: AnnotationGeometry.rect(a, in: box), forType: .freeText, withProperties: nil)
-                ann.contents = a.text; ann.font = NSFont(name: "Helvetica", size: 11) ?? .systemFont(ofSize: 11); ann.fontColor = .black
+                ann.userName = "LA:" + a.id.uuidString; ann.contents = a.text; ann.font = NSFont(name: "Helvetica", size: 11) ?? .systemFont(ofSize: 11); ann.fontColor = .black
                 ann.color = a.kind == .field ? NSColor(calibratedRed: 1, green: 0.98, blue: 0.8, alpha: 1) : .clear
                 if a.kind == .field { let b = PDFBorder(); b.lineWidth = 0.8; ann.border = b }
                 page.addAnnotation(ann)
@@ -146,7 +148,7 @@ public final class WorksheetService: @unchecked Sendable {
                     let pts = s.map { AnnotationGeometry.toPage(x: $0[0], y: $0[1], in: box) }
                     let r = pts.reduce(CGRect.null) { $0.union(CGRect(origin: $1, size: .zero)) }.insetBy(dx: -2, dy: -2)
                     let path = NSBezierPath(); path.move(to: CGPoint(x: pts[0].x - r.minX, y: pts[0].y - r.minY)); for p in pts.dropFirst() { path.line(to: CGPoint(x: p.x - r.minX, y: p.y - r.minY)) }
-                    let ann = PDFAnnotation(bounds: r, forType: .ink, withProperties: nil); ann.color = .black; let b = PDFBorder(); b.lineWidth = 1.5; ann.border = b; ann.add(path)
+                    let ann = PDFAnnotation(bounds: r, forType: .ink, withProperties: nil); ann.userName = "LA:" + a.id.uuidString; ann.color = .black; let b = PDFBorder(); b.lineWidth = 1.5; ann.border = b; ann.add(path)
                     page.addAnnotation(ann)
                 }
             }

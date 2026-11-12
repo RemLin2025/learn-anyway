@@ -54,6 +54,11 @@ public final class TemplateService: @unchecked Sendable {
     }
     public func delete(_ id: String) throws { guard !id.hasPrefix("builtin.") else { throw TemplateError.builtIn }; try db.write { try $0.execute(sql: "DELETE FROM learning_templates WHERE id = ?", arguments: [id]) } }
 
+    /// The template a study session was started from (nil for ordinary sessions).
+    public func template(forSession id: UUID) -> LearningTemplate? {
+        (try? db.read { try String.fetchOne($0, sql: "SELECT templateId FROM practice_set_sessions WHERE sessionId = ? LIMIT 1", arguments: [id]) }).flatMap { $0 }.flatMap { try? template($0) }
+    }
+
     // MARK: AI-assisted creation
 
     /// The request for a template draft. The model is told it can only fill in declarative settings and must list anything else under `unsupported`.
