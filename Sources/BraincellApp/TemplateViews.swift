@@ -41,7 +41,7 @@ struct TemplateGalleryView: View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack { Text(t.name).font(Theme.cardTitle); Badge(text: t.kind.title); if t.isBuiltIn { Badge(text: "Built-in", color: Theme.mastery) } else if t.baseId != nil { Badge(text: "Customized") } }
                 Text(t.description).font(.callout).foregroundStyle(Theme.textSecondary)
-                RenderDocumentView(doc: doc, limit: t.kind == .flashcards ? 1 : 2).frame(height: 230).clipped().overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
+                RenderDocumentView(doc: doc, limit: t.kind == .flashcards ? 1 : 2).frame(height: 230, alignment: .top).clipped().overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                     .accessibilityLabel("Preview of \(t.name)")
                 FlowLayout(spacing: 4) { ForEach(t.supportedFormats, id: \.self) { Badge(text: $0.replacingOccurrences(of: "_", with: " ")) } }
                 Text(customization(t)).font(.caption).foregroundStyle(Theme.textSecondary)
