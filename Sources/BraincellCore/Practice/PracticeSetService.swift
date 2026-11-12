@@ -189,6 +189,37 @@ public final class PracticeSetService: @unchecked Sendable {
         return SetGenerationReport(modelCalls: calls, filled: r.set.taskId == nil ? r.reused : r.reused + (try items(setId: setId).filter { $0.origin == "generated" }.count), missing: r.missing)
     }
 
+    // MARK: Presenting a saved set
+
+    public struct SetQuestion: Sendable { public var id: UUID; public var revisionId: UUID; public var spec: QuestionSpec; public var topic: String? }
+
+    /// The set's questions with their current content, in slot order. Reads stored revisions only: opening a set never calls a model.
+    public func questions(setId: UUID) throws -> [SetQuestion] {
+        try db.read { d in
+            try Row.fetchAll(d, sql: "SELECT i.slotJSON, q.id AS qid, q.currentRevisionId AS rid FROM practice_set_items i JOIN questions q ON q.id = i.questionId WHERE i.setId = ? AND q.archivedAt IS NULL ORDER BY i.position", arguments: [setId]).compactMap { r in
+                guard let rev = try QuestionRevision.fetchOne(d, key: r["rid"] as UUID), let spec = rev.spec else { return nil }
+                let slot = (try? JSONDecoder().decode(PlanSlot.self, from: Data((r["slotJSON"] as String).utf8)))
+                return SetQuestion(id: r["qid"], revisionId: r["rid"], spec: spec, topic: slot?.topic)
+            }
+        }
+    }
+
+    /// Starts (or resumes) a study session for a saved set presented by a template. The same questions can be practised under any compatible template;
+    /// an unfinished session for the same (set, template) is reopened, so interrupted progress is never discarded.
+    @discardableResult
+    public func startSession(setId: UUID, template: LearningTemplate, templates: TemplateService) throws -> (session: StudySession, resumed: Bool, skipped: [String]) {
+        guard let s = try practiceSet(setId) else { throw AITaskError.notFound }
+        let practice = PracticeService(db: db)
+        if let sid = try db.read({ try UUID.fetchOne($0, sql: "SELECT ps.sessionId FROM practice_set_sessions ps JOIN study_sessions s ON s.id = ps.sessionId WHERE ps.setId = ? AND ps.templateId = ? AND s.status != 'completed' ORDER BY ps.createdAt DESC", arguments: [setId, template.id]) }),
+           let existing = try? practice.session(sid) { return (existing, true, []) }
+        let qs = try questions(setId: setId)
+        let compat = templates.compatibility(template: template, items: qs.map { ($0.id, $0.spec, $0.topic) })
+        guard !compat.usable.isEmpty else { throw PracticeError.noQuestions }
+        let session = try practice.start(questionIds: compat.usable, title: "\(s.title) · \(template.name)", courseId: s.courseId, assessmentId: s.assessmentId)
+        try db.write { try $0.execute(sql: "INSERT OR IGNORE INTO practice_set_sessions (setId, templateId, sessionId, createdAt) VALUES (?,?,?,?)", arguments: [setId, template.id, session.id, Date()]) }
+        return (session, false, compat.skipped.map(\.reason))
+    }
+
     // MARK: Honest labels
 
     /// What has actually been checked for a question. "Recomputed" only when a deterministic check passed; otherwise it is labelled unverified.

@@ -203,3 +203,12 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - Cache: analyses made before the chunk layout joined the key are re-keyed only when their stored requests match the current text exactly.
 - **Not wired to UI/chat yet:** practice sets have no screen or chat tool; the existing Home generation flow still creates plain tasks (its questions do become reusable through the links).
 
+## Templates, rendering, worksheets, annotations (migration v21)
+- **LearningTemplate** (`Templates/`): versioned declarative schema (layout, sequencing, difficulty, timing, hints, feedback, inputs, scoring, exports). `TemplateParser` rejects unknown fields, out-of-range values and reserved ids; script/HTML/media/gamification requests become reported limitations and are never executed. Built-ins: Exam Worksheet, Interactive, Guided, Flashcards; personal templates are stored, duplicable and global or per course. AI-assisted creation is one scripted-testable model call that returns a draft, never saved automatically.
+- **Render model** (`Render/RenderModel.swift`): one `RenderDocument` built from saved questions + template, consumed by SwiftUI (`RenderViews.swift`) and the PDF writer. Switching template makes no model call (measured with the scripted gateway).
+- **Math layout** (`Render/MathLayout.swift`): boxes for fractions, roots, scripts, big operators with limits, stretchy fences, matrices, aligned rows, accents; unsupported LaTeX falls back to its source.
+- **Worksheets** (`Render/WorksheetRenderer.swift`, `WorksheetService.swift`): paginated CoreGraphics PDF, separate solutions PDF, generated deterministically from the stored set and rebuilt from the database if the file is deleted; files only under `worksheets/`.
+- **Annotations**: stored apart from the PDF, page-normalized; export as none / live PDF annotations / flattened.
+- **App**: Practice Sets section in the assessment workspace, set detail with template picker, Templates tab (gallery with real previews, customize, AI draft), worksheet viewer. Chat tools `practiceSets.list|create|resume|open`, `templates.list`.
+- **Verified by looking at output:** gallery and worksheet/math PDF renders from `BRAINCELL_TEMPLATE_SNAP`. **Not verified:** clicking in the worksheet viewer (placing text/fields, drawing), printing, save panels, live-annotation appearance in other PDF viewers, VoiceOver, a live model for set generation or AI templates.
+

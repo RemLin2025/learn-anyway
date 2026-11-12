@@ -75,8 +75,8 @@ struct PracticeView: View {
             } else if !pm.locked {
                 Menu("Stuck?") { ForEach(StuckKind.allCases) { k in Button(k.label) { stuck = k } } }.menuStyle(.borderlessButton).fixedSize()
                     .help("Get unstuck with prepared hints, related skills, or a help request you can send to ChatGPT yourself")
-                Button("Hint (\(pm.hintsUsed)/\(spec.hints.count))") { pm.revealHint() }
-                    .disabled(pm.hintsUsed >= spec.hints.count).keyboardShortcut("h", modifiers: [.command, .shift])
+                if pm.hintsAllowed { Button("Hint (\(pm.hintsUsed)/\(spec.hints.count))") { pm.revealHint() }
+                    .disabled(pm.hintsUsed >= spec.hints.count).keyboardShortcut("h", modifiers: [.command, .shift]) }
                 Button("Skip") { pm.skip() }.keyboardShortcut("]", modifiers: [.command, .shift])
                     .help("Skip for now. Anything you wrote is kept.")
                 Button(spec.type == .flashcard ? "Done" : "Submit") { pm.submit() }
@@ -171,7 +171,7 @@ struct PracticeView: View {
         Text("On demand. Using hints is recorded.").font(Theme.meta).foregroundStyle(Theme.textSecondary)
         if spec.hints.isEmpty { Text("No hints for this question.").foregroundStyle(Theme.textSecondary) }
         hints(spec)
-        if !pm.locked, pm.hintsUsed < spec.hints.count { Button("Show hint \(pm.hintsUsed + 1) of \(spec.hints.count)") { pm.revealHint() } }
+        if !pm.locked, pm.hintsAllowed, pm.hintsUsed < spec.hints.count { Button("Show hint \(pm.hintsUsed + 1) of \(spec.hints.count)") { pm.revealHint() } }
         if !spec.sources.isEmpty {
             Divider()
             Text("Sources").font(.subheadline.weight(.semibold))

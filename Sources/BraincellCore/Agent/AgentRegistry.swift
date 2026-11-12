@@ -3,7 +3,7 @@ import GRDB
 
 /// The assistant's tools. Each one calls an existing service; the registry only validates, describes and sequences.
 public enum AgentRegistry {
-    public static func all() -> [ToolSpec] { read + writes + sourceTools + prepTools + assessmentTools }
+    public static func all() -> [ToolSpec] { read + writes + sourceTools + prepTools + assessmentTools + practiceSetTools }
     public static func spec(_ name: String) -> ToolSpec? { all().first { $0.name == name } }
 
     static func limit(_ s: String, _ n: Int = 6000) -> String { s.count <= n ? s : String(s.prefix(n)) + "\n…(truncated)" }

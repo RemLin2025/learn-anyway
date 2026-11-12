@@ -881,6 +881,48 @@ public final class AppDatabase: Sendable {
             try db.create(index: "practice_set_items_question", on: "practice_set_items", columns: ["questionId"])
             try db.execute(sql: "CREATE UNIQUE INDEX practice_set_items_no_duplicates ON practice_set_items (setId, questionId) WHERE questionId IS NOT NULL")
         }
+        m.registerMigration("v21_templates_worksheets") { db in
+            try db.create(table: "learning_templates") { t in           // personal templates; built-ins live in code
+                t.primaryKey("id", .text)
+                t.column("name", .text).notNull()
+                t.column("templateJSON", .text).notNull()
+                t.column("baseId", .text)
+                t.column("courseId", .blob).references("courses", onDelete: .cascade)    // NULL = usable in every course
+                t.column("schemaVersion", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(table: "practice_set_sessions") { t in       // resume: which study session belongs to (set, template)
+                t.column("setId", .blob).notNull().references("practice_sets", onDelete: .cascade)
+                t.column("templateId", .text).notNull()
+                t.column("sessionId", .blob).notNull().references("study_sessions", onDelete: .cascade)
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["setId", "templateId", "sessionId"])
+            }
+            try db.create(table: "worksheets") { t in
+                t.primaryKey("id", .blob)
+                t.column("setId", .blob).notNull().references("practice_sets", onDelete: .cascade)
+                t.column("templateId", .text).notNull()
+                t.column("contentHash", .text).notNull()                // template + ordered question revisions + renderer version
+                t.column("path", .text).notNull()                       // relative to managed storage; generated files only, never source documents
+                t.column("solutionsPath", .text)
+                t.column("pageCount", .integer).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["setId", "contentHash"])
+            }
+            try db.create(table: "worksheet_annotations") { t in       // stored apart from generated content; coordinates are page-normalized
+                t.primaryKey("id", .blob)
+                t.column("worksheetId", .blob).notNull().references("worksheets", onDelete: .cascade)
+                t.column("page", .integer).notNull()
+                t.column("kind", .text).notNull()                       // text | field | ink
+                t.column("x", .double).notNull(); t.column("y", .double).notNull(); t.column("w", .double).notNull(); t.column("h", .double).notNull()
+                t.column("text", .text).notNull().defaults(to: "")
+                t.column("strokeJSON", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+            try db.create(index: "worksheet_annotations_on_sheet", on: "worksheet_annotations", columns: ["worksheetId", "page"])
+        }
         return m
     }
 

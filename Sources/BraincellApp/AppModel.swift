@@ -49,6 +49,12 @@ final class AppModel: ObservableObject {
     @Published var pendingWorkflowTask: String?
     func openWorkflow(task: String) { pendingWorkflowTask = task; openSettings(.workflow) }
     func openSettings(_ section: SettingsSection? = nil) { if let section { UserDefaults.standard.set(section.rawValue, forKey: "settingsSection") }; activeSessionID = nil; settingsOpen = true }
+    lazy var practiceSets: PracticeSetService? = { guard let db, let ai else { return nil }; return PracticeSetService(db: db, ai: ai) }()
+    lazy var templates: TemplateService? = db.map { TemplateService(db: $0) }
+    lazy var worksheets: WorksheetService? = { guard let db, let storage, let practiceSets, let templates else { return nil }; return WorksheetService(db: db, storage: storage, sets: practiceSets, templates: templates) }()
+    /// Set by chat chips / lists: the course screen opens this practice set.
+    @Published var openPracticeSetID: UUID?
+    @Published var courseTabRequest: String?
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
     lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()
@@ -260,6 +266,16 @@ final class AppModel: ObservableObject {
     /// Starts a session and opens the immersive practice workspace.
     func startPractice(questionIds: [UUID], title: String, courseId: UUID?, assessmentId: UUID? = nil) {
         perform { activeSessionID = try practice?.start(questionIds: questionIds, title: title, courseId: courseId, assessmentId: assessmentId).id }
+    }
+
+    /// Starts (or resumes) a session for a saved practice set in a template. Questions are never regenerated.
+    func startSetSession(setId: UUID, template: LearningTemplate) {
+        perform {
+            guard let practiceSets, let templates else { return }
+            let r = try practiceSets.startSession(setId: setId, template: template, templates: templates)
+            activeSessionID = r.session.id
+            if !r.skipped.isEmpty { alertMessage = "\(r.skipped.count) question(s) aren’t part of \(template.name) and were left out of this session." }
+        }
     }
 
     func practiceCourse(_ course: Course, assessment: Assessment? = nil) {

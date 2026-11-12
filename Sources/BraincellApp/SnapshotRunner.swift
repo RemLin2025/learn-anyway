@@ -1,4 +1,5 @@
 import SwiftUI
+import PDFKit
 import CoreText
 import AppKit
 import BraincellCore
@@ -27,6 +28,7 @@ enum SnapshotRunner {
         }
         if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
+        if ProcessInfo.processInfo.environment["BRAINCELL_TEMPLATE_SNAP"] != nil { await templateScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_LIBRARY_SNAP"] != nil { await libraryScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_BENCH"] != nil { await Bench.run(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_SETTINGS_SNAP"] != nil { await settingsScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -150,6 +152,44 @@ enum SnapshotRunner {
     }
 
     /// Library screenshots from synthetic files. Only with BRAINCELL_LIBRARY_SNAP and BRAINCELL_DATA_DIR (never your real library).
+    /// Template gallery, practice-set section and a real worksheet PDF rendered to PNG (checks pagination, math layout and annotations visually).
+    static func templateScenario(_ model: AppModel, dir: URL) async {
+        model.loadDemo()
+        guard let c = model.courseList.first, let db = model.db, let ids = try? model.practice?.questionIds(courseId: c.id), !ids.isEmpty, let sets = model.practiceSets, let ws = model.worksheets else { return }
+        let setId = UUID()
+        try? db.write { d in
+            try d.execute(sql: "INSERT INTO practice_sets (id, courseId, assessmentId, title, requestKey, paramsJSON, fresh, taskId, createdAt) VALUES (?,?,NULL,'Demo practice set','snap','{}',0,NULL,?)", arguments: [setId, c.id, Date()])
+            for (i, q) in ids.enumerated() {
+                let slot = "{\"id\":\"s\(i + 1)\",\"topic\":\"Demo\",\"archetype\":\"directComputation\",\"difficulty\":3,\"format\":\"any\",\"exemplars\":[],\"rationale\":\"\"}"
+                try d.execute(sql: "INSERT INTO practice_set_items (setId, slotId, position, slotJSON, questionId, origin) VALUES (?,?,?,?,?,'reused')", arguments: [setId, "s\(i + 1)", i, slot, q])
+            }
+        }
+        func shotWin(_ name: String) async {
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        model.selectedCourseID = c.id; model.selection = .courses
+        await shotWin("tpl-1-assessments")
+        model.courseTabRequest = "templates"
+        await shotWin("tpl-2-gallery")
+        if let w = try? ws.generate(setId: setId, template: .examWorksheet), let doc = PDFDocument(url: ws.url(w)) {
+            try? ws.save(WorksheetAnnotation(worksheetId: w.id, page: 0, kind: .field, x: 0.2, y: 0.35, w: 0.4, h: 0.05, text: "x = 4.5"))
+            let out = dir.appendingPathComponent("tpl-annotated.pdf"); try? ws.export(w, to: out, annotations: .flattened)
+            for (n, d) in [("plain", doc), ("annotated", PDFDocument(url: out) ?? doc)] {
+                for i in 0..<min(2, d.pageCount) { if let pg = d.page(at: i) { let img = pg.thumbnail(of: CGSize(width: 900, height: 1165), for: .mediaBox); if let tiff = img.tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) { try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("tpl-worksheet-\(n)-p\(i + 1).png")) } } }
+            }
+            NSLog("snapshot: worksheet pages=%d questions=%d", w.pageCount, ids.count)
+        }
+        // Math typesetting check: the gallery's sample questions (fractions, big operators, scripts) through the PDF writer.
+        let mathDoc = RenderBuilder.build(template: .examWorksheet, title: "Math layout check", questions: TemplateExamples.questions.map { (UUID(), $0, Optional("Probability")) } + [(UUID(), QuestionSpec(type: .derivationProof, title: "m", difficulty: 3, learningObjective: "o",
+            content: [.markdown("Show that $\\sqrt{a^2+b^2}\\ge a$ and evaluate:"), ContentBlock(kind: .math, latex: "\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}^{-1}=\\frac{1}{ad-bc}\\begin{pmatrix} d & -b \\\\ -c & a \\end{pmatrix}"), ContentBlock(kind: .math, latex: "\\int_{0}^{\\infty} e^{-x^{2}}\\,dx=\\frac{\\sqrt{\\pi}}{2}"), ContentBlock(kind: .math, latex: "\\sum_{k=1}^{n} \\left(\\frac{k}{n}\\right)^{2}")],
+            answer: AnswerSpec(), evaluation: EvaluationSpec(method: .aiRubric)), "T")])
+        let mp = dir.appendingPathComponent("tpl-math.pdf"); _ = try? WorksheetRenderer.write(mathDoc, to: mp)
+        if let d = PDFDocument(url: mp) { for i in 0..<min(2, d.pageCount) { if let pg = d.page(at: i), let tiff = pg.thumbnail(of: CGSize(width: 1100, height: 1424), for: .mediaBox).tiffRepresentation, let rep = NSBitmapImageRep(data: tiff) { try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("tpl-math-p\(i + 1).png")) } } }
+        _ = sets
+    }
+
     static func libraryScenario(_ model: AppModel, dir: URL) async {
         guard let lib = model.library, let courses = model.courses, ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
         let src = dir.appendingPathComponent("src", isDirectory: true); let fm = FileManager.default
