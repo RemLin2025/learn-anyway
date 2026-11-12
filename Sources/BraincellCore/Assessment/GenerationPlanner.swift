@@ -11,6 +11,7 @@ public struct PlanSlot: Codable, Equatable, Sendable, Identifiable {
     public var exemplars: [SourceQuestionRef]
     public var exemplarSummary: String?             // a compact description of the source technique (not the source text)
     public var rationale: String
+    public var archetypeKey: String? = nil          // the reusable course-level archetype this slot follows (nil for plans made before archetypes existed)
 }
 
 public struct GenerationPlan: Codable, Equatable, Sendable {
@@ -40,7 +41,7 @@ public enum GenerationPlanner {
         return out
     }
 
-    public static func plan(mode: GenerationMode, count: Int, topics: [TopicInput], sources: [SourceQuestionRow], profile: StyleProfile?, config: AssessmentConfig, excluded: [String]) -> GenerationPlan {
+    public static func plan(mode: GenerationMode, count: Int, topics: [TopicInput], sources: [SourceQuestionRow], profile: StyleProfile?, config: AssessmentConfig, excluded: [String], archetypes: [ArchetypeModel] = []) -> GenerationPlan {
         var limitations: [String] = []
         var pool = topics.sorted { ($0.existingCount, $0.name) < ($1.existingCount, $1.name) }       // least-covered first
         if mode == .weakSkills {
@@ -105,6 +106,13 @@ public enum GenerationPlanner {
                 slots.append(PlanSlot(id: "s\(i + 1)", topic: t.name, reasoningSkill: sameTopic?.payload.reasoningSkills.first, archetype: a, difficulty: diffCycle[i % diffCycle.count], format: format,
                                       exemplars: e, exemplarSummary: sum, rationale: mode == .weakSkills ? "Targets a weaker topic." : "Covers the least-practised topics with varied reasoning demands."))
             }
+        }
+        // Slots follow the aggregated course-level archetype (merged method, constraints, mistakes) instead of one source question's description.
+        let byKey = Dictionary(archetypes.map { ($0.key, $0) }, uniquingKeysWith: { a, _ in a })
+        for i in slots.indices {
+            guard let sid = slots[i].exemplars.first?.sourceQuestionId, let r = sources.first(where: { $0.id.uuidString == sid }), let a = byKey[ArchetypeLibrary.key(for: r.payload)] else { continue }
+            slots[i].archetypeKey = a.key; slots[i].exemplarSummary = ArchetypeLibrary.summary(a)
+            slots[i].exemplars = [slots[i].exemplars[0]] + a.sources.filter { $0.sourceQuestionId != sid }.prefix(2)
         }
         return GenerationPlan(mode: mode, slots: slots, excludedTopics: excluded, limitations: limitations, styleUsed: mode == .matchInstructorStyle && styleOK,
                               weakTargets: mode == .weakSkills ? pool.filter(\.weak).map(\.name) : [])

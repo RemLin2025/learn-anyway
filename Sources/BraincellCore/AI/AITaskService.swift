@@ -125,7 +125,8 @@ public struct AITaskService: Sendable {
         let profile = (mode == .matchInstructorStyle || mode == .similarReasoning) ? try svc.profile(courseId: task.courseId, assessmentId: task.assessmentId) : nil
         let cfg = try task.assessmentId.map { try svc.config(assessmentId: $0) } ?? AssessmentConfig()
         var plan = GenerationPlanner.plan(mode: mode, count: params.count, topics: skills.map { .init(name: $0.name, existingCount: counts[$0.id] ?? 0, weak: weak.contains($0.normalizedName)) },
-                                          sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames)
+                                          sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames,
+                                          archetypes: try ArchetypeLibrary(db: db).archetypes(courseId: task.courseId, excluding: scope.excludedNames))
         plan.limitations += scope.limitations
         try GenerationPlanStore(db: db).save(plan, taskId: task.id)
     }

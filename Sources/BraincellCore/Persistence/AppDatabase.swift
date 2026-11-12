@@ -820,6 +820,28 @@ public final class AppDatabase: Sendable {
                 t.column("updatedAt", .datetime).notNull()
             }
         }
+        m.registerMigration("v19_course_archetypes") { db in
+            try db.create(table: "course_archetypes") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("key", .text).notNull()
+                t.column("kind", .text).notNull()
+                t.column("modelJSON", .text).notNull()
+                t.column("fingerprint", .text).notNull()            // hash of the source questions it was built from
+                t.column("updatedAt", .datetime).notNull()
+                t.uniqueKey(["courseId", "key"])
+            }
+            try db.create(table: "course_archetype_sources") { t in      // dependency tracking: which analyzed questions feed which archetype
+                t.column("archetypeId", .blob).notNull().references("course_archetypes", onDelete: .cascade)
+                t.column("sourceQuestionId", .blob).notNull().references("source_questions", onDelete: .cascade)
+                t.primaryKey(["archetypeId", "sourceQuestionId"])
+            }
+            try db.create(table: "archetype_aggregates") { t in
+                t.primaryKey("courseId", .blob).references("courses", onDelete: .cascade)
+                t.column("fingerprint", .text).notNull()
+                t.column("builtAt", .datetime).notNull()
+            }
+        }
         return m
     }
 
