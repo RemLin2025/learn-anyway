@@ -85,6 +85,19 @@ public final class SourceAnalysisService: @unchecked Sendable {
     /// Analyzes one document. Reuses a complete analysis for the same content, analyzer version and configuration without calling a model;
     /// resumes unfinished windows otherwise. A changed document gets a new analysis and the old one is marked stale.
     public func analyze(_ doc: Document, label: String = "Source Summarization") async throws -> AnalysisOutcome {
+        // Concurrent callers for the same content join one run instead of sending every window twice.
+        let key = "\(doc.id)|\(doc.sha256)"
+        let (task, owner): (Task<AnalysisOutcome, Error>, Bool) = Self.inflight.withLock { m in
+            if let t = m[key] { return (t, false) }
+            let t = Task { try await self.analyzeUncoalesced(doc) }; m[key] = t; return (t, true)
+        }
+        if owner { defer { Self.inflight.withLock { $0[key] = nil } } ; return try await task.value }
+        return try await task.value
+    }
+    private static let inflight = InFlight()
+    final class InFlight: @unchecked Sendable { private let l = NSLock(); private var m: [String: Task<AnalysisOutcome, Error>] = [:]; func withLock<R>(_ f: (inout [String: Task<AnalysisOutcome, Error>]) -> R) -> R { l.withLock { f(&m) } } }
+
+    func analyzeUncoalesced(_ doc: Document) async throws -> AnalysisOutcome {
         let chunks = try db.read { try DocumentChunk.filter(Column("documentId") == doc.id && Column("isLowContent") == false).order(Column("ordinal")).fetchAll($0) }
         guard !chunks.isEmpty else { throw AnalysisError.unavailable("“\(doc.title)” has no readable text to analyze. OCR is not available, so scanned pages are skipped.") }
         let cfg = Self.configHash()
@@ -92,7 +105,10 @@ public final class SourceAnalysisService: @unchecked Sendable {
         let analysisId: UUID = try db.write { d in
             try d.execute(sql: "UPDATE source_analyses SET status = 'stale' WHERE documentId = ? AND documentSha != ? AND status != 'stale'", arguments: [doc.id, doc.sha256])
             if let ex = try Row.fetchOne(d, sql: "SELECT id, status FROM source_analyses WHERE documentId = ? AND documentSha = ? AND analyzerVersion = ? AND configHash = ?", arguments: [doc.id, doc.sha256, Self.version, cfg]) {
-                return ex["id"]
+                let id: UUID = ex["id"]
+                // Content reverted to an earlier version: bring that analysis back instead of leaving it hidden as stale.
+                try d.execute(sql: "UPDATE source_analyses SET status = CASE WHEN windowsDone = windowsTotal THEN 'complete' ELSE 'pending' END WHERE id = ? AND status = 'stale'", arguments: [id])
+                return id
             }
             let id = UUID()
             var lim: [String] = []
