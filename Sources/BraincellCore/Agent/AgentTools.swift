@@ -31,9 +31,10 @@ public struct ActionChip: Codable, Sendable, Equatable, Hashable {
     public var action: String               // openCourse | openLibrary | openQuestionBank | openSkills | addFiles | startPractice | openPlan | startReviews | resumeSession
     public var courseId: UUID?
     public var assessmentId: UUID?
+    public var setId: UUID?
     public var planId: UUID?
     public var dayIndex: Int?
-    public static let allowed: Set<String> = ["openCourse", "openLibrary", "openQuestionBank", "openSkills", "addFiles", "startPractice", "openPlan", "startReviews", "resumeSession", "prepareExam"]
+    public static let allowed: Set<String> = ["openCourse", "openLibrary", "openQuestionBank", "openSkills", "addFiles", "startPractice", "openPlan", "startReviews", "resumeSession", "prepareExam", "openPracticeSet"]
 }
 
 public struct ToolOutput: Sendable {
@@ -85,11 +86,13 @@ public struct AgentContext: Sendable {
     public var calendar: Calendar = .current
     public let courses: CourseService, docs: DocumentService, library: LibraryService, questions: QuestionService
     public let ai: AITaskService, planner: PlannerService, progression: ProgressionService, store: AgentStore
+    public let practiceSets: PracticeSetService, templates: TemplateService
 
     public init(db: AppDatabase, storage: ManagedStorage, gateway: AIGateway, now: @escaping @Sendable () -> Date = { Date() }, calendar: Calendar = .current) {
         self.db = db; self.storage = storage; self.gateway = gateway; self.now = now; self.calendar = calendar
         courses = CourseService(db: db); docs = DocumentService(db: db, storage: storage); library = LibraryService(db: db, storage: storage, now: now)
         questions = QuestionService(db: db); ai = AITaskService(db: db); planner = PlannerService(db: db); progression = ProgressionService(db: db); store = AgentStore(db: db, now: now)
+        practiceSets = PracticeSetService(db: db, ai: ai); templates = TemplateService(db: db)
     }
 
     static func norm(_ s: String) -> String { s.lowercased().filter { $0.isLetter || $0.isNumber } }
