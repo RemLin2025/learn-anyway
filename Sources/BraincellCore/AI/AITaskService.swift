@@ -112,7 +112,13 @@ public struct AITaskService: Sendable {
     }
 
     func buildPlan(task: AITask, scope: AssessmentService.Scope) throws {
-        let params = self.params(of: task)
+        try GenerationPlanStore(db: db).save(try makePlan(courseId: task.courseId, assessmentId: task.assessmentId, params: self.params(of: task), scope: scope), taskId: task.id)
+    }
+
+    /// The plan for a generation request, without creating a task. Practice sets use it to decide which slots reuse existing questions.
+    func makePlan(courseId: UUID, assessmentId: UUID?, params: GenerationParams, scope: AssessmentService.Scope) throws -> GenerationPlan {
+        struct T { var courseId: UUID; var assessmentId: UUID? }
+        let task = T(courseId: courseId, assessmentId: assessmentId)
         let skills = try db.read { d in try Skill.fetchAll(d, keys: params.skillIds).filter { $0.archivedAt == nil } }
         let counts: [UUID: Int] = try db.read { d in
             Dictionary(uniqueKeysWithValues: try Row.fetchAll(d, sql: "SELECT skillId, COUNT(*) c FROM question_skills qs JOIN questions q ON q.id = qs.questionId WHERE q.archivedAt IS NULL AND q.courseId = ? GROUP BY skillId", arguments: [task.courseId]).map { ($0["skillId"] as UUID, $0["c"] as Int) })
@@ -128,16 +134,20 @@ public struct AITaskService: Sendable {
                                           sources: sources, profile: profile, config: cfg, excluded: scope.excludedNames,
                                           archetypes: try ArchetypeLibrary(db: db).archetypes(courseId: task.courseId, excluding: scope.excludedNames))
         plan.limitations += scope.limitations
-        try GenerationPlanStore(db: db).save(plan, taskId: task.id)
+        return plan
     }
 
     @discardableResult
     func insertGenerationTask(courseId: UUID, assessmentId: UUID?, params: GenerationParams) throws -> AITask {
+        try db.write { try Self.insertGenerationTask($0, courseId: courseId, assessmentId: assessmentId, params: params) }
+    }
+
+    static func insertGenerationTask(_ d: Database, courseId: UUID, assessmentId: UUID?, params: GenerationParams) throws -> AITask {
         guard (1...200).contains(params.count) else { throw AITaskError.invalidParams("Ask for between 1 and 200 questions.") }
         guard 1 <= params.minDifficulty, params.minDifficulty <= params.maxDifficulty, params.maxDifficulty <= 5 else {
             throw AITaskError.invalidParams("Difficulty must be within 1–5.")
         }
-        return try db.write { d in
+        do {
             guard let course = try Course.fetchOne(d, key: courseId) else { throw AITaskError.notFound }
             var p = params
             if let a = assessmentId, try Assessment.fetchOne(d, key: a)?.courseId != courseId { throw AITaskError.invalidParams("That assessment belongs to another course.") }

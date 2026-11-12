@@ -842,6 +842,45 @@ public final class AppDatabase: Sendable {
                 t.column("builtAt", .datetime).notNull()
             }
         }
+        m.registerMigration("v20_practice_sets") { db in
+            // Question content (questions), reasoning pattern (course_archetypes), practice sets and attempts stay separate concepts; these tables only link them.
+            try db.create(table: "question_archetype_links") { t in
+                t.primaryKey("questionId", .blob).references("questions", onDelete: .cascade)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("archetypeKey", .text)                     // NULL when the plan had no archetype
+                t.column("archetypeFingerprint", .text)             // the archetype version the question was built from; a mismatch means it is out of date
+                t.column("kind", .text).notNull()
+                t.column("topicKey", .text).notNull()
+                t.column("format", .text).notNull()                 // question type
+                t.column("difficulty", .integer).notNull()
+                t.column("evidenceJSON", .text).notNull()           // source references the generation was based on
+                t.column("createdAt", .datetime).notNull()
+            }
+            try db.create(index: "question_archetype_links_lookup", on: "question_archetype_links", columns: ["courseId", "archetypeKey", "topicKey"])
+            try db.create(table: "practice_sets") { t in
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).notNull().references("courses", onDelete: .cascade)
+                t.column("assessmentId", .blob).references("assessments", onDelete: .setNull)
+                t.column("title", .text).notNull()
+                t.column("requestKey", .text).notNull()             // retries of one request map to one set
+                t.column("paramsJSON", .text).notNull()
+                t.column("fresh", .boolean).notNull().defaults(to: false)
+                t.column("taskId", .blob).references("ai_tasks", onDelete: .setNull)
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["courseId", "requestKey"])
+            }
+            try db.create(table: "practice_set_items") { t in
+                t.column("setId", .blob).notNull().references("practice_sets", onDelete: .cascade)
+                t.column("slotId", .text).notNull()
+                t.column("position", .integer).notNull()
+                t.column("slotJSON", .text).notNull()
+                t.column("questionId", .blob).references("questions", onDelete: .setNull)
+                t.column("origin", .text)                           // reused | generated (NULL while unfilled)
+                t.primaryKey(["setId", "slotId"])
+            }
+            try db.create(index: "practice_set_items_question", on: "practice_set_items", columns: ["questionId"])
+            try db.execute(sql: "CREATE UNIQUE INDEX practice_set_items_no_duplicates ON practice_set_items (setId, questionId) WHERE questionId IS NOT NULL")
+        }
         return m
     }
 

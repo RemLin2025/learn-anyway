@@ -121,7 +121,10 @@ public final class ArchetypeLibrary: @unchecked Sendable {
     /// Archetypes for a course, optionally narrowed to topics (by normalized name) and without excluded topics. Rebuilds first only if the sources changed.
     public func archetypes(courseId: UUID, topics: [String]? = nil, excluding: [String] = [], kind: Archetype? = nil) throws -> [ArchetypeModel] {
         try rebuildIfNeeded(courseId: courseId)
-        let all = try db.read { try String.fetchAll($0, sql: "SELECT modelJSON FROM course_archetypes WHERE courseId = ? ORDER BY key", arguments: [courseId]) }.compactMap { try? JSONDecoder().decode(ArchetypeModel.self, from: Data($0.utf8)) }
+        let all: [ArchetypeModel] = try db.read { try Row.fetchAll($0, sql: "SELECT modelJSON, fingerprint FROM course_archetypes WHERE courseId = ? ORDER BY key", arguments: [courseId]) }.compactMap { r in
+            guard var m = try? JSONDecoder().decode(ArchetypeModel.self, from: Data((r["modelJSON"] as String).utf8)) else { return nil }
+            m.fingerprint = r["fingerprint"]; return m                      // the column is the source of truth for versioning
+        }
         let tk = topics?.map(\.skillKey), ek = excluding.map(\.skillKey)
         return all.filter { m in
             let mk = m.topics.map(\.skillKey)

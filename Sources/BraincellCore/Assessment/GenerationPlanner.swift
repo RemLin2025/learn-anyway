@@ -132,9 +132,10 @@ public final class GenerationPlanStore: @unchecked Sendable {
         return p.slots.filter { !met.contains($0.id) }
     }
 
-    public func save(_ p: GenerationPlan, taskId: UUID) throws {
+    public func save(_ p: GenerationPlan, taskId: UUID) throws { try db.write { try Self.save($0, p, taskId: taskId) } }
+    static func save(_ d: Database, _ p: GenerationPlan, taskId: UUID) throws {
         let json = String(data: try JSONEncoder().encode(p), encoding: .utf8) ?? "{}"
-        try db.write { try $0.execute(sql: "INSERT OR REPLACE INTO generation_plans (taskId, mode, planJSON, createdAt) VALUES (?,?,?,?)", arguments: [taskId, p.mode.rawValue, json, Date()]) }
+        try d.execute(sql: "INSERT OR REPLACE INTO generation_plans (taskId, mode, planJSON, createdAt) VALUES (?,?,?,?)", arguments: [taskId, p.mode.rawValue, json, Date()])
     }
     public func load(taskId: UUID) throws -> GenerationPlan? {
         try db.read { try String.fetchOne($0, sql: "SELECT planJSON FROM generation_plans WHERE taskId = ?", arguments: [taskId]) }.flatMap { try? JSONDecoder().decode(GenerationPlan.self, from: Data($0.utf8)) }

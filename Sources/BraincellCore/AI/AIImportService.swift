@@ -169,6 +169,13 @@ extension AITaskService {
             let slot = plan?.slots.contains { $0.id == prov.slotId } == true ? prov.slotId : nil
             try d.execute(sql: "INSERT OR REPLACE INTO question_provenance (questionId, revisionId, planId, slotId, mode, primaryArchetype, topic, origin, createdAt) VALUES (?,?,?,?,?,?,?,?,?)",
                            arguments: [q.id, q.currentRevisionId, plan == nil ? nil : task.id.uuidString, slot, (prov.mode ?? plan?.mode)?.rawValue, prov.primaryArchetype, prov.topic, prov.origin, Date()])
+            if let plan, let slot = plan.slots.first(where: { $0.id == prov.slotId }) {
+                // Make the question reusable: remember which archetype (and which version of it) it was built from.
+                let fp = try slot.archetypeKey.flatMap { try String.fetchOne(d, sql: "SELECT fingerprint FROM course_archetypes WHERE courseId = ? AND key = ?", arguments: [task.courseId, $0]) }
+                let evidenceJSON = String(data: (try? JSONEncoder().encode(slot.exemplars)) ?? Data(), encoding: .utf8) ?? "[]"
+                try d.execute(sql: "INSERT OR REPLACE INTO question_archetype_links (questionId, courseId, archetypeKey, archetypeFingerprint, kind, topicKey, format, difficulty, evidenceJSON, createdAt) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                               arguments: [q.id, task.courseId, slot.archetypeKey, fp, prov.primaryArchetype ?? slot.archetype, (prov.topic ?? slot.topic).skillKey, spec.type.rawValue, spec.difficulty, evidenceJSON, Date()])
+            }
             let topicId = try prov.topic.flatMap { try SourceAnalysisService.topicSkill(d, courseId: task.courseId, name: $0) }
             for name in prov.reasoningSkills where !name.trimmingCharacters(in: .whitespaces).isEmpty {
                 let rid = try ReasoningStore.ensure(d, courseId: task.courseId, name: name, topicSkillId: topicId)

@@ -195,3 +195,11 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - **Validation** (`Assessment/MathChecks.swift`): interval choices, structured checks (finite/joint PMF, geometric MGF), evidence rows. Schema v2 adds optional fields; v1 stays valid.
 - **Exam simulation** (`Practice/ExamService.swift`): persisted selection, exam-wide clock, deferred feedback, idempotent submission.
 - Not done: OCR, DOCX/PPTX, a general CAS, guided step-by-step work submission, per-step diagnosis.
+
+## Workflow V2 reuse layer (migrations v18–v20)
+- **Assessment-aware selection** (`Assessment/AssessmentSelector.swift`, v18 `extract_selections`): scores passages by the assessment's linked materials, stated include/exclude scope, planned topics, analyzed practice problems and exam-instruction text; linked material gets a larger budget share but each passage still competes on relevance; passages that only cover an excluded topic are skipped (and listed), general/prerequisite text is kept; per-passage reasons and basis (confirmed / user-provided / inferred) are stored per request. No topic weights are inferred.
+- **Archetype model** (`Assessment/ArchetypeModel.swift`, v19): course-level aggregate of analyzed questions keyed by kind | topic | reasoning skill, with steps, formulas, structure, difficulty range, mistakes, variation constraints, source refs, heuristic confidence and verification label. Rebuilt only when the underlying analyses change (whole-course and per-archetype fingerprints). The planner and `archetypes.list` read it.
+- **Practice sets** (`Practice/PracticeSetService.swift`, v20): slots filled from compatible stored questions (same archetype version, topic, format, difficulty ±1, no failed check), only missing slots generated, retries and concurrent calls converge on one set / one model call, `fresh` never reuses served or attempted questions. Source questions stay in `source_questions`; generated ones carry provenance and an archetype link.
+- Cache: analyses made before the chunk layout joined the key are re-keyed only when their stored requests match the current text exactly.
+- **Not wired to UI/chat yet:** practice sets have no screen or chat tool; the existing Home generation flow still creates plain tasks (its questions do become reusable through the links).
+
