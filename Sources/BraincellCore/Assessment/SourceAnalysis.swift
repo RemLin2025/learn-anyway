@@ -300,8 +300,10 @@ public final class SourceAnalysisService: @unchecked Sendable {
 
     /// Source questions from current (non-stale) analyses, optionally restricted to documents.
     public func sourceQuestions(courseId: UUID, documentIds: Set<UUID>? = nil) throws -> [SourceQuestionRow] {
-        try db.read { d in
-            try Row.fetchAll(d, sql: """
+        try db.read { try Self.sourceQuestions($0, courseId: courseId, documentIds: documentIds) }
+    }
+    static func sourceQuestions(_ d: Database, courseId: UUID, documentIds: Set<UUID>? = nil) throws -> [SourceQuestionRow] {
+        return try Row.fetchAll(d, sql: """
                 SELECT q.id, q.analysisId, q.documentId, q.payload, documents.title AS dt FROM source_questions q JOIN source_analyses a ON a.id = q.analysisId JOIN documents ON documents.id = q.documentId
                 WHERE q.courseId = ? AND a.status != 'stale' ORDER BY documents.title, q.locator
                 """, arguments: [courseId]).compactMap { r in
@@ -310,7 +312,6 @@ public final class SourceAnalysisService: @unchecked Sendable {
                     if let ids = documentIds, !ids.contains(doc) { return nil }
                     return SourceQuestionRow(id: r["id"], analysisId: r["analysisId"], documentId: doc, documentTitle: r["dt"], payload: p)
                 }
-        }
     }
 }
 

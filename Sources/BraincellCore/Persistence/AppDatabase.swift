@@ -813,6 +813,13 @@ public final class AppDatabase: Sendable {
                 t.column("maxScore", .double)
             }
         }
+        m.registerMigration("v18_extract_selections") { db in
+            try db.create(table: "extract_selections") { t in      // why each passage went into a request (audit trail), one row per batch
+                t.primaryKey("batchId", .blob).references("ai_task_batches", onDelete: .cascade)
+                t.column("logJSON", .text).notNull()
+                t.column("updatedAt", .datetime).notNull()
+            }
+        }
         return m
     }
 
