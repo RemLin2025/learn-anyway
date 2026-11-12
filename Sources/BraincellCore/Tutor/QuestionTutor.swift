@@ -9,6 +9,9 @@ public struct TutorMessage: Codable, Equatable, Sendable, Identifiable, Fetchabl
     public var role: String            // user | assistant
     public var content: String
     public var createdAt: Date
+    public init(id: UUID, attemptId: UUID, questionId: UUID, role: String, content: String, createdAt: Date) {
+        self.id = id; self.attemptId = attemptId; self.questionId = questionId; self.role = role; self.content = content; self.createdAt = createdAt
+    }
 }
 
 /// Why a tutor request failed, in terms the learner can act on. The review screen never depends on the tutor working.

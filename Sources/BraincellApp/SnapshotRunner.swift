@@ -26,6 +26,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_REVIEW_SNAP"] != nil { await reviewScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_TEMPLATE_SNAP"] != nil { await templateScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -290,6 +291,56 @@ enum SnapshotRunner {
             v.cacheDisplay(in: v.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("s\(i)-\(s.rawValue.prefix(5)).png"))
         }
+    }
+
+    /// Post-submission review screens: a wrong and a right answer on a question with per-option explanations (multiline code option included), an old
+    /// question without them, and a seeded tutor conversation. Only with BRAINCELL_REVIEW_SNAP and a throwaway BRAINCELL_DATA_DIR.
+    static func reviewScenario(_ model: AppModel, dir: URL) async {
+        guard ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        model.loadDemo()
+        guard let c = model.courseList.first, let qs = model.questions, let p = model.practice, let ev = model.evaluation, let tutor = model.tutorService, let db = model.db else { return }
+        func shot(_ name: String) async {
+            await shot1(name, bottom: false); await shot1(name + "-bottom", bottom: true)
+        }
+        func shot1(_ name: String, bottom: Bool) async {
+            if bottom, let v = NSApp.windows.first(where: { $0.isVisible })?.contentView {
+                func scrollers(_ v: NSView) -> [NSScrollView] { (v as? NSScrollView).map { [$0] } ?? [] + v.subviews.flatMap(scrollers) }
+                if let sv = scrollers(v).max(by: { $0.frame.height < $1.frame.height }), let doc = sv.documentView { doc.scroll(NSPoint(x: 0, y: doc.isFlipped ? max(0, doc.bounds.height - sv.contentView.bounds.height) : 0)) }
+            }
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        let cs = [("a", "class Box<T> { T item; T get() { return item; } }", "Declares T and uses it for both the field and the return type, so no cast is needed."),
+                  ("b", "class Box { T item; }", "Uses T without declaring a type parameter, so it does not compile."),
+                  ("c", "class Box<T> {\n    Object item;\n    T get() { return item; }\n}", "Stores an Object, which cannot be returned as T without a cast."),
+                  ("d", "class Box<T> { Object get() { return null; } }", "Returns Object, so callers lose the generic return type.")]
+        let spec = QuestionSpec(type: .singleChoice, title: "Declaring a generic container", difficulty: 3, learningObjective: "generics",
+                                content: [.markdown("Which declaration of a generic `Box` compiles and keeps the item’s type?")],
+                                answer: AnswerSpec(choices: cs.map { Choice(id: $0.0, text: $0.1, why: $0.2) }, correctIds: ["a"]), evaluation: EvaluationSpec(method: .choice),
+                                solution: [.markdown("A type parameter must be declared before use.")])
+        guard let q = try? qs.create(courseId: c.id, spec: spec) else { return }
+        let old = (try? qs.list(QuestionFilter()))?.first { $0.title.hasPrefix("Which call removes") }?.id
+        func session(_ id: UUID, pick: String, title: String) -> UUID? {
+            guard let s = try? p.start(questionIds: [id], title: title, courseId: c.id), let it = try? p.items(sessionId: s.id).first else { return nil }
+            var r = PracticeResponse(); r.selected = [pick]
+            if let a = try? p.submit(itemId: it.id, response: r) {
+                _ = try? ev.evaluate(attemptId: a.id)
+                if title.hasPrefix("Wrong") {
+                    try? db.write { d in
+                        try TutorMessage(id: UUID(), attemptId: a.id, questionId: id, role: "user", content: "Why is my answer wrong?", createdAt: Date()).insert(d)
+                        try TutorMessage(id: UUID(), attemptId: a.id, questionId: id, role: "assistant", content: "Option C stores the value as `Object`:\n\n```java\nObject item;\nT get() { return item; } // error: Object cannot convert to T\n```\n\nA field of type `T` keeps the type; \\(T\\) is only known to the compiler, so an `Object` needs an unchecked cast.", createdAt: Date().addingTimeInterval(1)).insert(d)
+                    }
+                }
+            }
+            return s.id
+        }
+        _ = tutor
+        model.snapshotIndex = nil
+        if let sid = session(q.id, pick: "c", title: "Wrong pick") { model.activeSessionID = sid; await shot("r1-wrong"); model.activeSessionID = nil }
+        if let sid = session(q.id, pick: "a", title: "Right pick") { model.activeSessionID = sid; await shot("r2-right"); model.activeSessionID = nil }
+        if let o = old, let sid = session(o, pick: "b", title: "Old question") { model.activeSessionID = sid; await shot("r3-old"); model.activeSessionID = nil }
     }
 
     /// Submits and grades a mixed set of answers through the real services, then captures the M5 screens.

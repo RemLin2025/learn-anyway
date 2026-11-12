@@ -55,6 +55,7 @@ final class AppModel: ObservableObject {
     /// Set by chat chips / lists: the course screen opens this practice set.
     @Published var openPracticeSetID: UUID?
     @Published var courseTabRequest: String?
+    lazy var tutorService: QuestionTutorService? = db.map { QuestionTutorService(db: $0, gateway: gateway) }
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
     lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()

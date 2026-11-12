@@ -35,6 +35,9 @@ final class PracticeModel: ObservableObject {
     @Published var tryOutput: CodeRunOutput?
     @Published var tryMessage: String?
     @Published var running = false
+    /// nil = unknown. Only a verified key is independently confirmed; everything else is just the stored key.
+    @Published var keyVerified: Bool?
+    private var tutors: [UUID: TutorModel] = [:]
 
     private var loading = false
     private var dirty = false
@@ -86,12 +89,25 @@ final class PracticeModel: ObservableObject {
             result = try attempt.map { try evalSvc.evaluate(attemptId: $0.id) }
             response = try svc.response(for: it, spec: specs[it.id]!)
             seconds = it.activeSeconds
-            skills = (try? app.questions?.detail(it.questionId).skills) ?? []
+            let detail = try? app.questions?.detail(it.questionId)
+            skills = detail?.skills ?? []
+            keyVerified = detail.map { $0.question.readiness == .verified }
             coachSuggestion = nil; confidence = nil; testReport = nil; tryOutput = nil; tryMessage = nil
             askConfidence = attempt == nil && ((try? app.history?.shouldAskConfidence(itemId: it.id, setting: app.confidencePrompts)) ?? false)
             if SnapshotRunner.isActive, let a = attempt { coachSuggestion = try? app.coach?.suggestion(sessionId: sessionID, attemptId: a.id, enabled: true, now: Date().addingTimeInterval(7200)) } // screenshot aid
             try svc.moveTo(sessionId: sessionID, ordinal: i)
         } catch { fail(error) }
+    }
+
+    /// One tutor conversation per submitted attempt, kept for the life of the session so switching questions never mixes or loses it.
+    func tutor() -> TutorModel? {
+        guard let a = attempt, let it = item, let s = spec, let svc = app.tutorService else { return nil }
+        if let t = tutors[a.id] { return t }
+        let ctx = TutorContext(questionId: it.questionId, topics: skills.map(\.name), spec: s, selected: response.selected, typedAnswer: response.text, keyVerified: keyVerified)
+        let ok = AnswerReview(spec: s, selected: response.selected)?.answeredCorrectly ?? ((result?.evaluation.score ?? 0) >= 0.8)
+        let t = TutorModel(attemptId: a.id, context: ctx, svc: svc, answeredCorrectly: ok)
+        tutors[a.id] = t
+        return t
     }
 
     // MARK: Persistence

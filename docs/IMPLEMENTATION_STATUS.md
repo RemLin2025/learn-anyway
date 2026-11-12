@@ -212,3 +212,9 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - **App**: Practice Sets section in the assessment workspace, set detail with template picker, Templates tab (gallery with real previews, customize, AI draft), worksheet viewer. Chat tools `practiceSets.list|create|resume|open`, `templates.list`.
 - **Verified by looking at output:** gallery and worksheet/math PDF renders from `BRAINCELL_TEMPLATE_SNAP`. **Not verified:** clicking in the worksheet viewer (placing text/fields, drawing), printing, save panels, live-annotation appearance in other PDF viewers, VoiceOver, a live model for set generation or AI templates.
 
+
+## Practice review and AI tutor (migration v22)
+- Choice questions: options show correct/your-answer states inline (icon + label, not colour alone); the "Not quite" card and the "A couple of misses" coach card are gone for choice questions (compact XP line stays). Other question types keep their grade card and reference panel.
+- `Choice.why` (optional, backward compatible) holds a per-option explanation; the validator keeps it only when every option has one; the generation prompt asks for it. Old questions fall back to the saved solution with an on-demand "Explain each option with AI".
+- `QuestionTutorService` stores one conversation per attempt (`question_tutor_messages`), grounded with the question, options, key, learner's answer, explanation and verification status, and calls the existing gateway through the `chatAssistant` route (no new credential path; the model runs only when the learner sends a message).
+- Verified by unit tests (review model, validator, tutor context, failure/retry, no provider) and by screenshots of the real views (`BRAINCELL_REVIEW_SNAP`). Not verified: live model replies, VoiceOver, keyboard traversal, window resizing by hand.
