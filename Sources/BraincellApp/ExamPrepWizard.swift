@@ -28,14 +28,19 @@ final class ExamPrepModel: ObservableObject {
     @Published var maxD = 5
     @Published var types: Set<QuestionType> = []
     @Published var fresh = false
+    @Published var topicReuse = true
     @Published var plan: ExamPrepCoordinator.Plan?
     @Published var busy = false
     @Published var status = ""
     @Published var error: String?
     @Published var finished = false
 
+    /// The wizard currently on screen; only read by the end-to-end verification scenario.
+    static weak var current: ExamPrepModel?
+
     init(app: AppModel, co: ExamPrepCoordinator, request: PrepRequest) {
         self.app = app; self.co = co
+        Self.current = self
         templates = (try? app.templates?.all()) ?? LearningTemplate.builtIns
         courseId = request.courseId ?? app.selectedCourseID ?? app.courseList.first?.id
         assessmentName = request.assessmentName ?? ""
@@ -91,7 +96,7 @@ final class ExamPrepModel: ObservableObject {
     func makePlan() {
         guard let j = job else { return }
         saveReview(); error = nil
-        do { plan = try co.plan(j.id, count: count, minDifficulty: minD, maxDifficulty: max(minD, maxD), types: Array(types), fresh: fresh); app.reload() } catch { self.error = error.localizedDescription }
+        do { plan = try co.plan(j.id, count: count, minDifficulty: minD, maxDifficulty: max(minD, maxD), types: Array(types), fresh: fresh, topicReuse: topicReuse); app.reload() } catch { self.error = error.localizedDescription }
     }
 
     func generate() {
@@ -120,7 +125,7 @@ struct ExamPrepWizard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: Theme.Space.md) {
-            HStack { Text("Prepare for an exam").font(Theme.sectionTitle); Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }
+            HStack { Text("Prepare for an exam").font(Theme.sectionTitle).accessibilityAddTraits(.isHeader); Spacer(); Button("Close") { dismiss() }.keyboardShortcut(.cancelAction) }
             stepper
             Divider()
             ScrollView { content.frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 4) }
@@ -254,9 +259,11 @@ struct ExamPrepWizard: View {
                 ForEach(QuestionType.allCases, id: \.self) { q in Toggle(q.label, isOn: Binding(get: { m.types.contains(q) }, set: { if $0 { m.types.insert(q) } else { m.types.remove(q) } })).toggleStyle(.button) }
             }
             Toggle("Fresh questions only (skip ones already practised or in another set)", isOn: $m.fresh)
+            Toggle("Also reuse saved questions on the same topic that follow a different reasoning pattern", isOn: $m.topicReuse)
+            Text("Reused questions always match the topic, format and difficulty range. With this off, only questions built for the exact reasoning pattern are reused and everything else is generated.").font(.caption).foregroundStyle(Theme.textSecondary)
             Button { m.makePlan() } label: { Label("Check what can be reused", systemImage: "arrow.triangle.branch") }.buttonStyle(.primary)
             if let p = m.plan {
-                Label("\(p.reused) saved question\(p.reused == 1 ? "" : "s") will be reused · \(p.missing) to generate", systemImage: p.missing == 0 ? "checkmark.circle.fill" : "sparkles")
+                Label("\(p.reused) saved question\(p.reused == 1 ? "" : "s") will be reused\(p.topicOnly > 0 ? " (\(p.topicOnly) on the same topic with a different pattern)" : "") · \(p.missing) to generate", systemImage: p.missing == 0 ? "checkmark.circle.fill" : "sparkles")
                     .foregroundStyle(p.missing == 0 ? Theme.mastery : Theme.accent).font(.callout.weight(.medium))
                 Text(p.missing == 0 ? "No model call is needed." : "Only the \(p.missing) missing question\(p.missing == 1 ? "" : "s") will be generated. This needs a configured model.").font(.caption).foregroundStyle(Theme.textSecondary)
             }
@@ -291,12 +298,12 @@ struct ExamPrepWizard: View {
             Button("Back") { m.back() }.disabled(m.step == .course || m.busy)
             Spacer()
             switch m.step {
-            case .course: Button("Continue") { m.begin() }.buttonStyle(.primary).disabled(m.courseId == nil || m.assessmentName.trimmed.isEmpty)
-            case .materials: Button("Continue") { m.next() }.buttonStyle(.primary).disabled(m.materials?.readable.isEmpty ?? true)
-            case .analyze: Button("Continue") { m.next() }.buttonStyle(.primary).disabled(m.map == nil || m.busy || m.materials?.analysisStale == true)
-            case .review: Button("Approve study map") { m.saveReview(); m.next() }.buttonStyle(.primary).disabled(m.map == nil)
-            case .template: Button("Continue") { m.saveReview(); m.next() }.buttonStyle(.primary)
-            case .configure: Button("Continue") { m.next() }.buttonStyle(.primary).disabled(m.plan == nil)
+            case .course: Button("Continue") { m.begin() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(m.courseId == nil || m.assessmentName.trimmed.isEmpty)
+            case .materials: Button("Continue") { m.next() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(m.materials?.readable.isEmpty ?? true)
+            case .analyze: Button("Continue") { m.next() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(m.map == nil || m.busy || m.materials?.analysisStale == true)
+            case .review: Button("Approve study map") { m.saveReview(); m.next() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(m.map == nil)
+            case .template: Button("Continue") { m.saveReview(); m.next() }.buttonStyle(.primary).keyboardShortcut(.defaultAction)
+            case .configure: Button("Continue") { m.next() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(m.plan == nil)
             case .create: EmptyView()
             }
         }

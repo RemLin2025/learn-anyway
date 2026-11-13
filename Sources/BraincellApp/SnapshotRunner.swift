@@ -26,6 +26,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_E2E"] != nil { await prepE2E(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_UNI_SNAP"] != nil { await universalScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_REVIEW_SNAP"] != nil { await reviewScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -292,6 +293,144 @@ enum SnapshotRunner {
             v.cacheDisplay(in: v.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("s\(i)-\(s.rawValue.prefix(5)).png"))
         }
+    }
+
+    /// End-to-end run of the exam-preparation flow through the real wizard model, services, database and HTTP gateway against scripts/mock-model-server.py
+    /// (BRAINCELL_E2E_PORT, BRAINCELL_E2E_LOG). Two phases in two processes (BRAINCELL_E2E_PHASE=1,2) over one BRAINCELL_DATA_DIR so a real quit/relaunch happens in
+    /// the middle. Mocked model: results prove the app's behaviour and call counts, not live-model quality. Writes PASS/FAIL lines to e2e-log.txt.
+    static func prepE2E(_ model: AppModel, dir: URL) async {
+        let env = ProcessInfo.processInfo.environment
+        guard env["BRAINCELL_DATA_DIR"] != nil, let port = env["BRAINCELL_E2E_PORT"], let logPath = env["BRAINCELL_E2E_LOG"], let gw = model.gateway, let courses = model.courses, let docs = model.documents,
+              let ps = model.practiceSets, let practice = model.practice, let ev = model.evaluation, let lib = model.library, let qs = model.questions, let chat = model.chat else { return }
+        let phase = env["BRAINCELL_E2E_PHASE"] ?? "1"
+        var out = ""
+        func note(_ s: String) { out += s + "\n"; try? out.write(to: dir.appendingPathComponent("e2e-log-phase\(phase).txt"), atomically: true, encoding: .utf8) }
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { note("\(ok ? "PASS" : "FAIL") \(name)\(detail.isEmpty ? "" : " — " + detail)") }
+        func calls(_ kind: String) -> Int { ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "").split(separator: "\n").filter { $0.contains("\"\(kind)\"") }.count }
+        func shot(_ name: String, sheet: Bool = false) async {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            let w = NSApp.windows.first(where: { $0.isVisible && ($0.attachedSheet != nil || !sheet) && $0.contentView != nil })
+            guard let v = (sheet ? w?.attachedSheet?.contentView : w?.contentView), let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("e2e\(phase)-\(name).png"))
+        }
+        func until(_ secs: Double, _ cond: @MainActor () -> Bool) async -> Bool { let end = Date().addingTimeInterval(secs); while Date() < end { if cond() { return true }; try? await Task.sleep(nanoseconds: 200_000_000) }; return cond() }
+        do {
+            let (c, _) = try await gw.connect(providerId: "custom", name: "Mock model", baseURL: "http://127.0.0.1:\(port)/v1", apiKey: "test")
+            try gw.store.setDefault(.llm, connection: c.id, model: "scripted-model")
+        } catch { note("FAIL connect — \(error.localizedDescription)"); return }
+        model.aiConfig?.reload()
+        note("phase \(phase); model calls so far — topics \(calls("topics")), questions \(calls("questions")), summary \(calls("summary"))")
+
+        if phase == "1" {
+            guard let course = try? courses.createCourse(name: "STOR435") else { return }
+            for (n, t) in [("notes.txt", "Chapter 2: Estimation. Chapter 2 is worth 40% of the exam grade.\n\nMaximum likelihood estimators maximize the likelihood. Worked example: the MLE of an exponential rate is 1/mean.\n\nConfidence intervals cover the parameter with a stated probability."), ("syllabus.txt", "Midterm 3 covers estimation and confidence intervals.")] {
+                let f = dir.appendingPathComponent(n); try? t.write(to: f, atomically: true, encoding: .utf8); _ = try? docs.importFile(at: f, courseId: course.id)
+            }
+            model.reload(); model.selection = .home; chat.newChat()
+            await shot("01-home")
+            model.openExamPrep()                                                    // exactly what the “Prepare for an exam” button calls
+            check("Prepare for an exam opens the wizard", await until(5) { ExamPrepModel.current != nil && model.prepRequest != nil })
+            guard let m = ExamPrepModel.current else { return }
+            await shot("02-course", sheet: true)
+            m.courseId = course.id; m.assessmentName = "Midterm 3"; m.begin()
+            check("course + new assessment accepted, materials step", m.step == .materials && m.job != nil, "assessments: \((try? courses.assessments(courseId: course.id).map(\.name)) ?? [])")
+            check("relevant materials found", m.materials?.readable.count == 2, "\(m.materials?.readable.map(\.name) ?? [])")
+            await shot("03-materials", sheet: true)
+            m.next(); check("no model call before analysis", calls("topics") == 0)
+            m.analyze(); _ = await until(30) { !m.busy }
+            check("analysis ran once", calls("topics") == 1 && m.map?.topics.count == 3, "topics \(m.map?.topics.map(\.name) ?? [])")
+            let est = m.map?.topics.first { $0.name == "Estimation" }
+            check("instructor weight kept as stated; estimates not presented as instructor", est?.importance.source == .instructor && est?.importance.weightPercent == 40 && m.map?.topics.first { $0.name == "Maximum likelihood" }?.importance.weightPercent == nil)
+            await shot("04-analyzed", sheet: true)
+            m.go(.review); await shot("05-review", sheet: true)
+            m.templateId = "builtin.guided"; m.saveReview(); m.go(.template); await shot("06-template", sheet: true)
+            m.go(.configure); m.count = 4; await shot("07-configure", sheet: true)
+            m.makePlan()
+            check("reuse breakdown shown before any generation cost", m.plan?.reused == 0 && m.plan?.missing == 4 && calls("questions") == 0, "plan reused \(m.plan?.reused ?? -1), to generate \(m.plan?.missing ?? -1)")
+            await shot("08-plan", sheet: true)
+            note("ENDING PHASE 1 with the workflow unfinished (step: \(m.step.rawValue)).")
+            model.prepRequest = nil; try? await Task.sleep(nanoseconds: 500_000_000)      // an open sheet would hold the app open at quit
+            return
+        }
+
+        // Phase 2: a fresh process over the same data directory.
+        guard let course = model.courseList.first(where: { $0.name == "STOR435" }) else { note("FAIL course missing after relaunch"); return }
+        model.selection = .home
+        model.openExamPrep(courseId: course.id, assessment: "Midterm 3")           // what chat's auto-open and Home both do
+        check("wizard reopens", await until(5) { ExamPrepModel.current != nil })
+        guard let m = ExamPrepModel.current else { return }
+        check("resumes at the saved step with saved choices", m.step == .create && m.templateId == "builtin.guided" && m.plan?.missing == 4 && m.map?.topics.count == 3, "step \(m.step.rawValue)")
+        check("relaunch made no model call", calls("topics") == 1 && calls("questions") == 0)
+        await shot("01-resumed", sheet: true)
+        m.generate(); _ = await until(30) { !m.busy }
+        let setsNow = (try? ps.sets(courseId: course.id)) ?? []
+        check("missing questions generated and saved", m.finished && calls("questions") >= 1 && setsNow.count == 1, "question calls \(calls("questions"))")
+        guard let set = setsNow.first else { return }
+        let items = (try? ps.items(setId: set.id)) ?? []
+        check("set has 4 saved questions", items.filter { $0.questionId != nil }.count == 4)
+        await shot("02-created", sheet: true)
+        model.prepRequest = nil
+        model.selection = .library; model.librarySection = .practiceSets; await shot("03-library-sets")
+        check("set appears in Library search", ((try? model.librarySearch?.search("Midterm"))?.hits(.practiceSet).contains { $0.key == set.id.uuidString }) == true)
+        model.selection = .courses; model.selectedCourseID = course.id; try? await Task.sleep(nanoseconds: 800_000_000); model.courseTabRequest = "practice"; await shot("04-course-practice")
+        let guided = (try? model.templates?.template("builtin.guided")) ?? .guided
+        model.startSetSession(setId: set.id, template: guided)
+        check("practice session begins", model.activeSessionID != nil)
+        let sid = model.activeSessionID
+        if let sid, let its = try? practice.items(sessionId: sid).first {
+            var r = PracticeResponse(); r.selected = ["a"]
+            if let a = try? practice.submit(itemId: its.id, response: r) { _ = try? ev.evaluate(attemptId: a.id) }
+        }
+        await shot("05-session")
+        model.activeSessionID = nil; try? await Task.sleep(nanoseconds: 500_000_000)
+        model.startSetSession(setId: set.id, template: guided)
+        let p1 = try? ps.progress(setId: set.id)
+        check("exit then resume returns to the same attempt with its answer", model.activeSessionID == sid && p1?.answered == 1 && p1?.total == 4, "answered \(p1?.answered ?? -1)/\(p1?.total ?? -1)")
+        model.activeSessionID = nil
+        // Edit the set while the attempt exists.
+        let extra = (try? qs.create(courseId: course.id, spec: QuestionSpec(type: .shortAnswer, title: "Extra question", difficulty: 2, learningObjective: "x", content: [.markdown("Name the estimator.")], answer: AnswerSpec(accepted: ["mle"]), evaluation: EvaluationSpec(method: .exact))))?.id
+        if let extra { try? ps.add(questionId: extra, to: set.id) }
+        let p2 = try? ps.progress(setId: set.id), sessionItems = sid.flatMap { try? practice.items(sessionId: $0).count }
+        check("editing the set leaves the existing attempt unchanged", p2?.answered == 1 && p2?.total == 4 && p2?.stale == true && sessionItems == 4 && ((try? ps.items(setId: set.id).count) ?? 0) == 5, "attempt \(p2?.answered ?? -1)/\(p2?.total ?? -1), set now \((try? ps.items(setId: set.id).count) ?? -1) questions")
+        let before = calls("questions")
+        try? ps.update(setId: set.id, templateId: "builtin.flashcards")
+        check("switching template makes no model call", calls("questions") == before && calls("topics") == 1)
+        // Reuse: a second assessment reuses saved questions.
+        if let co = model.chat.map({ ExamPrepCoordinator($0.ctx) }), let j = try? co.start(course: course, assessmentName: "Midterm 4"), let plan = try? co.plan(j.id, count: 4) {
+            check("existing questions are reused before generating", plan.reused > 0, "same-shape plan: reused \(plan.reused), to generate \(plan.missing)")
+            if let p3 = try? co.plan(j.id, count: 3) { note("INFO a 3-question plan has different topic/archetype slots: reused \(p3.reused), to generate \(p3.missing) (reuse never takes loosely related questions)") }
+        } else { check("reuse plan", false) }
+        // Source change invalidates only the analysis.
+        let f = dir.appendingPathComponent("extra-notes.txt"); try? "Bootstrap resampling estimates the sampling distribution.".write(to: f, atomically: true, encoding: .utf8); _ = try? docs.importFile(at: f, courseId: course.id)
+        if let co = model.chat.map({ ExamPrepCoordinator($0.ctx) }), let j = co.existingJob(courseId: course.id, assessmentName: "Midterm 3") {
+            let stale = (try? co.materials(courseId: course.id, job: j))?.analysisStale == true
+            check("changed source marks analysis stale", stale)
+            _ = try? await co.analyze(j.id)
+            check("only the topic analysis reran", calls("topics") == 2 && calls("questions") == before, "topic calls \(calls("topics"))")
+            check("template choice and saved questions survived", ((try? co.job(j.id))?.state.templateId) == "builtin.guided" && ((try? ps.items(setId: set.id).count) ?? 0) == 5)
+        }
+        // Delete / restore.
+        try? ps.delete(setId: set.id)
+        let trash = (try? lib.recentlyDeleted()) ?? []
+        check("deleted set is in Library → Recently Deleted", trash.contains { $0.ref.kind == .practiceSet && $0.ref.id == set.id })
+        model.selection = .library; model.librarySection = .recentlyDeleted; model.reload(); await shot("06-recently-deleted")
+        if let item = trash.first(where: { $0.ref.id == set.id }) { try? lib.restore(item.ref) }
+        check("restore brings the set back with its attempt", ((try? ps.sets(courseId: course.id))?.contains { $0.id == set.id }) == true && (try? ps.progress(setId: set.id))?.answered == 1)
+        try? lib.deleteCourse(course.id); model.reload()
+        check("deleted course disappears", !model.courseList.contains { $0.id == course.id })
+        try? lib.restore(LibraryRef(id: course.id, kind: .courseFolder)); model.reload()
+        check("restored course keeps its practice set and progress", model.courseList.contains { $0.id == course.id } && (try? ps.progress(setId: set.id))?.answered == 1)
+        note("FINAL model calls — topics \(calls("topics")), questions \(calls("questions")), summary \(calls("summary"))")
+
+        // Summaries: reuse before generating.
+        model.openSummaries(courseId: course.id)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        if let svc = model.noteSummaries, let cand = try? svc.candidates(courseId: course.id), let first = cand.first {
+            let r1 = try? await svc.summarize(documentIds: [first.id]); let r2 = try? await svc.summarize(documentIds: [first.id])
+            check("summary generated once then reused", r1?.generated == 1 && r2?.reused == 1 && r2?.modelCalls == 0 && calls("summary") == 1, "summary calls \(calls("summary"))")
+        }
+        await shot("07-summaries", sheet: true)
+        model.summaryRequest = nil
     }
 
     /// Universal Library and course Practice tab screenshots on the demo workspace. Only with BRAINCELL_UNI_SNAP and a throwaway BRAINCELL_DATA_DIR.

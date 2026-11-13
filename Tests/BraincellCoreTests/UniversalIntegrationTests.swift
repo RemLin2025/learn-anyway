@@ -25,9 +25,11 @@ extension AgentTests {
         let stale = try await co.analyze(job.id)
         #expect(e.script.prompts.filter { $0.user.contains("You analyze course material") }.count == analyzedCalls + 1)
         #expect(stale.state.templateId == "builtin.guided" && stale.state.setId == nil)
-        // Saved questions are reused for the new plan; only the shortfall is generated.
-        let plan = try co.plan(job.id, count: 2)
-        #expect(plan.reused > 0 || plan.missing <= 2)
+        // The same request shape for another exam reuses the saved questions (reuse is strict: topic, archetype and difficulty must match the slot).
+        let other = try co.start(course: c, assessmentName: "Midterm 4")
+        let n = try #require(try co.job(job.id)?.state.params?.count)
+        let plan = try co.plan(other.id, count: n)
+        #expect(plan.reused > 0 && plan.reused + plan.missing == n && plan.set.title == "Midterm 4 practice · \(n) questions")
     }
 
     @Test func unfinishedPreparationSurvivesQuittingAndReopening() async throws {

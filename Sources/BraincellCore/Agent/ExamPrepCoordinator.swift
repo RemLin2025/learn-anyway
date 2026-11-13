@@ -86,13 +86,15 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
 
     public struct Plan: Sendable, Equatable {
         public var set: PracticeSet; public var reused: Int; public var missing: Int
-        public init(set: PracticeSet, reused: Int, missing: Int) { self.set = set; self.reused = reused; self.missing = missing }
+        /// Of `reused`, how many were chosen by topic alone (different reasoning pattern from the slot). Shown to the learner, never hidden.
+        public var topicOnly: Int
+        public init(set: PracticeSet, reused: Int, missing: Int, topicOnly: Int = 0) { self.set = set; self.reused = reused; self.missing = missing; self.topicOnly = topicOnly }
     }
 
     /// The plan already saved on the job (after a restart), recomputed from the set's real items.
     public func currentPlan(_ id: UUID) -> Plan? {
         guard let j = try? job(id), let sid = j.state.setId, let set = try? c.practiceSets.practiceSet(sid), set.deletedAt == nil, let items = try? c.practiceSets.items(setId: sid) else { return nil }
-        return Plan(set: set, reused: items.filter { $0.origin == "reused" }.count, missing: items.filter { $0.questionId == nil }.count)
+        return Plan(set: set, reused: items.filter(\.isReused).count, missing: items.filter { $0.questionId == nil }.count, topicOnly: items.filter(\.isTopicOnlyReuse).count)
     }
 
     /// The saved job for a course + assessment name, if there is one.
@@ -103,17 +105,23 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
 
     /// Stage 6: how many saved questions fit and how many would be generated. Creates (or replaces) the planned set but calls no model.
     @discardableResult
-    public func plan(_ id: UUID, count: Int, minDifficulty: Int = 1, maxDifficulty: Int = 5, types: [QuestionType] = [], fresh: Bool = false, generateMissing: Bool = true, requestKey: String? = nil) throws -> Plan {
+    public func plan(_ id: UUID, count: Int, minDifficulty: Int = 1, maxDifficulty: Int = 5, types: [QuestionType] = [], fresh: Bool = false, generateMissing: Bool = true, requestKey: String? = nil, topicReuse: Bool = true) throws -> Plan {
         guard let j = try job(id) else { throw ToolError.unavailable("That preparation no longer exists.") }
         let skills = try includedSkillIds(j)
         var params = GenerationParams(count: max(1, min(count, 60)), types: types, minDifficulty: minDifficulty, maxDifficulty: maxDifficulty, skillIds: skills, documentIds: [], mode: .matchInstructorStyle)
         params.notes = "Exam preparation questions for \(j.assessmentId.map { _ in "the assessment" } ?? "the course"). Generated practice, not the real exam."
         // A changed plan replaces the unused set from the previous plan; a set that already has attempts is never touched.
         if let old = j.state.setId, (try c.practiceSets.progress(setId: old)).state == .notStarted { try c.practiceSets.delete(setId: old) }
-        let p = try c.practiceSets.prepare(courseId: j.courseId, assessmentId: j.assessmentId, params: params, fresh: fresh, requestKey: requestKey)
+        let p = try c.practiceSets.prepare(courseId: j.courseId, assessmentId: j.assessmentId, params: params, fresh: fresh, requestKey: requestKey, topicReuse: topicReuse)
         if let t = j.state.templateId { try c.practiceSets.update(setId: p.set.id, templateId: t) }
+        // Name the set after the exam so it can be found in the Library and on the Practice tab ("Midterm 3 practice · 10 questions").
+        var named = p.set
+        if let aid = j.assessmentId, let an = try c.courses.assessments(courseId: j.courseId).first(where: { $0.id == aid })?.name {
+            let title = "\(an) practice · \(params.count) questions"
+            try c.practiceSets.update(setId: p.set.id, title: title); named.title = title
+        }
         _ = try mutate(id) { $0.params = params; $0.setId = p.set.id; $0.wizardStep = "create" }
-        return Plan(set: p.set, reused: p.reused, missing: generateMissing ? p.missing : 0)
+        return Plan(set: named, reused: p.reused, missing: generateMissing ? p.missing : 0, topicOnly: p.topicOnly)
     }
 
     /// Stage 7: generate only what the plan found missing, validate and save, then mark the job complete. Failed batches can simply be run again.
@@ -147,7 +155,7 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
         var plan: Plan
         if cached, let b = before { plan = b } else {
             let n = min(30, max(10, analyzed.state.topicCount * 2))
-            plan = try self.plan(job.id, count: n, fresh: regenerate, requestKey: regenerate ? "regen-" + UUID().uuidString : nil)
+            plan = try self.plan(job.id, count: n, fresh: regenerate, requestKey: regenerate ? "regen-" + UUID().uuidString : nil, topicReuse: false)   // one-shot, unreviewed: exact-pattern reuse only
         }
         do {
             if plan.missing > 0 { stage("Generating \(plan.missing) new question(s)"); _ = try await generate(job.id) }

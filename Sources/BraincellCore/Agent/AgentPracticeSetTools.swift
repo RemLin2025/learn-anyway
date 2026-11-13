@@ -20,7 +20,7 @@ extension AgentRegistry {
     ]
 
     static func setLine(_ s: PracticeSet, _ it: [PracticeSetItem]) -> String {
-        let filled = it.filter { $0.questionId != nil }.count, reused = it.filter { $0.origin == "reused" }.count
+        let filled = it.filter { $0.questionId != nil }.count, reused = it.filter(\.isReused).count
         return "- \(s.title) (id \(s.id.uuidString)): \(filled)/\(it.count) questions, \(reused) reused, \(filled - reused) generated" + (filled < it.count ? "; \(it.count - filled) still to generate" : "") + (s.fresh ? "; fresh" : "")
     }
 

@@ -28,7 +28,7 @@ struct LibraryView: View {
     private var rail: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 2) {
-                Text("Library").font(Theme.cardTitle).padding(.horizontal, 10).padding(.bottom, 6)
+                Text("Library").font(Theme.cardTitle).padding(.horizontal, 10).padding(.bottom, 6).accessibilityAddTraits(.isHeader)
                 ForEach(LibrarySection.allCases) { s in
                     Button { model.librarySection = s } label: {
                         Label(s.rawValue, systemImage: s.symbol).lineLimit(1).frame(maxWidth: .infinity, alignment: .leading)

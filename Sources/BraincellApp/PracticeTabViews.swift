@@ -198,7 +198,12 @@ struct PracticeSetEditorSheet: View {
                             Image(systemName: "line.3.horizontal").foregroundStyle(Theme.textSecondary).accessibilityHidden(true)
                             VStack(alignment: .leading, spacing: 1) { Text(r.title).lineLimit(2); Text(r.detail).font(.caption).foregroundStyle(Theme.textSecondary) }
                             Spacer()
-                            if let q = r.questionId { Button { remove(q) } label: { Image(systemName: "minus.circle") }.buttonStyle(.borderless).accessibilityLabel("Remove \(r.title)") }
+                            // Dragging works, but reordering must also be possible from the keyboard and VoiceOver.
+                            Button { shift(r, by: -1) } label: { Image(systemName: "chevron.up").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.borderless)
+                                .disabled(rows.first?.id == r.id).accessibilityLabel("Move \(r.title) up")
+                            Button { shift(r, by: 1) } label: { Image(systemName: "chevron.down").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.borderless)
+                                .disabled(rows.last?.id == r.id).accessibilityLabel("Move \(r.title) down")
+                            if let q = r.questionId { Button { remove(q) } label: { Image(systemName: "minus.circle").frame(width: 24, height: 24).contentShape(Rectangle()) }.buttonStyle(.borderless).accessibilityLabel("Remove \(r.title)") }
                         }
                     }.onMove(perform: move)
                 }.frame(minHeight: 220)
@@ -222,6 +227,12 @@ struct PracticeSetEditorSheet: View {
         model.reload()
     }
     private func remove(_ q: UUID) { do { try model.practiceSets?.remove(questionId: q, from: set.id) } catch { notice = error.localizedDescription }; reload() }
+    private func shift(_ r: Row, by d: Int) {
+        guard let i = rows.firstIndex(where: { $0.id == r.id }), rows.indices.contains(i + d) else { return }
+        var order = rows.map(\.slotId); order.swapAt(i, i + d)
+        do { try model.practiceSets?.reorder(setId: set.id, slotOrder: order) } catch { notice = error.localizedDescription }
+        reload()
+    }
     private func move(_ from: IndexSet, _ to: Int) {
         var order = rows.map(\.slotId); order.move(fromOffsets: from, toOffset: to)
         do { try model.practiceSets?.reorder(setId: set.id, slotOrder: order) } catch { notice = error.localizedDescription }
