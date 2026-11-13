@@ -246,11 +246,11 @@ public struct QuestionService: Sendable {
     public func saveView(name: String, filter: QuestionFilter) throws {
         let n = try CourseService.clean(name)
         let json = String(data: try JSONEncoder().encode(filter), encoding: .utf8) ?? "{}"
-        try db.write { try SavedView(id: UUID(), name: n, filterJSON: json, createdAt: Date()).insert($0) }
+        try db.write { try SavedView(id: UUID(), name: n, filterJSON: json, createdAt: Date(), category: "questions").insert($0) }
     }
 
     public func savedViews() throws -> [SavedView] {
-        try db.read { try SavedView.order(Column("createdAt")).fetchAll($0) }
+        try db.read { try SavedView.filter(Column("category") == "questions").order(Column("createdAt")).fetchAll($0) }
     }
 
     public func deleteView(_ id: UUID) throws { _ = try db.write { try SavedView.deleteOne($0, key: id) } }

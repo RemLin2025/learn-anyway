@@ -39,7 +39,16 @@ struct LibraryBrowser: View {
     enum Tab: Hashable { case items, deleted }
     enum Pill: Hashable { case filter(LibraryFilter), favorites, deleted }
 
-    init(base: LibraryLocation, title: String? = nil) { self.base = base; self.title = title; _location = State(initialValue: base) }
+    var hidePills = false
+    init(base: LibraryLocation, title: String? = nil, initial: Pill? = nil, hidePills: Bool = false) {
+        self.base = base; self.title = title; self.hidePills = hidePills; _location = State(initialValue: base)
+        switch initial {
+        case .filter(let f)?: var q = LibraryQuery(); q.filter = f; _query = State(initialValue: q)
+        case .favorites?: var q = LibraryQuery(); q.favoritesOnly = true; _query = State(initialValue: q)
+        case .deleted?: _tab = State(initialValue: .deleted)
+        case nil: break
+        }
+    }
 
     private var lib: LibraryService? { model.library }
     private var pill: Pill {
@@ -71,13 +80,15 @@ struct LibraryBrowser: View {
         } message: { Text("You can restore \((deleting?.count ?? 0) == 1 ? "it" : "them") from Recently Deleted for seven days. After that, \((deleting?.count ?? 0) == 1 ? "it is" : "they are") permanently deleted.") }
         .onChange(of: model.snapshotShowDeleted) { _, on in if SnapshotRunner.isActive, base == .root { tab = on ? .deleted : .items } }       // screenshot aids
         .onChange(of: model.snapshotLibrarySearch) { _, t in if let t, SnapshotRunner.isActive, base == .root { searchText = t } }
-        .onAppear { if SnapshotRunner.isActive, let t = model.snapshotLibrarySearch, base == .root { searchText = t } }
+        .onAppear { if SnapshotRunner.isActive, let t = model.snapshotLibrarySearch, base == .root { searchText = t }; seedSearch() }
+        .onChange(of: model.librarySearchSeed) { _, _ in seedSearch() }
         .focusable().focusEffectDisabled()
         .onKeyPress(.space) { if let e = selectedEntries.first, !e.isFolder { previewing = e; return .handled }; return .ignored }
         .onKeyPress(.return) { if let e = selectedEntries.first { open(e); return .handled }; return .ignored }
         .onDeleteCommand { if !selection.isEmpty { deleting = selectedEntries.filter { $0.kind != .courseFolder }.map(\.ref) } }
     }
 
+    private func seedSearch() { if base == .root, let t = model.librarySearchSeed { searchText = t; model.librarySearchSeed = nil } }
     private var deleteTitle: String { let n = deleting?.count ?? 0; return n == 1 ? "Delete this item?" : "Delete \(n) items?" }
     private var selectedEntries: [LibraryEntry] { entries.filter { selection.contains($0.id) } }
     private var reloadKey: String { "\(location)|\(query.text)|\(query.filter)|\(query.favoritesOnly)|\(query.sort)|\(query.ascending)|\(model.revision)" }
@@ -87,6 +98,7 @@ struct LibraryBrowser: View {
     private var header: some View {
         HStack(spacing: Theme.Space.md) {
             if let title { Text(title).font(Theme.pageTitle).lineLimit(1); Spacer(minLength: Theme.Space.md) }
+            else if hidePills { Spacer(minLength: Theme.Space.md) }
             else { pillTabs.frame(minWidth: 100) }
             Menu {
                 Picker("Sort by", selection: $query.sort) { ForEach(LibrarySort.allCases, id: \.self) { Text($0.rawValue).tag($0) } }
@@ -96,6 +108,8 @@ struct LibraryBrowser: View {
             HStack(spacing: 2) {
                 layoutButton("grid", "square.grid.2x2", "Grid view"); layoutButton("list", "list.bullet", "List view")
             }.padding(3).background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            if hidePills { SavedViewsMenu(category: "materials", current: MaterialsViewFilter(text: searchText, filter: query.filter.rawValue, favoritesOnly: query.favoritesOnly, sort: query.sort.rawValue, ascending: query.ascending)) { v in
+                searchText = v.text; query.filter = LibraryFilter(rawValue: v.filter) ?? .all; query.favoritesOnly = v.favoritesOnly; query.sort = LibrarySort(rawValue: v.sort) ?? .name; query.ascending = v.ascending } }
             SearchField(prompt: "Search library", text: $searchText).frame(minWidth: 100, idealWidth: title == nil ? 170 : 240, maxWidth: title == nil ? 220 : 280)
             Menu {
                 Button { newFolder = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }.disabled(tab == .deleted)

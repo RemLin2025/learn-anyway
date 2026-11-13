@@ -10,6 +10,13 @@ struct RootView: View {
             } else { library }
         }
         .sheet(item: $model.practiceSetup) { PracticeSetupSheet(request: $0) }
+        .sheet(item: $model.newSetCourse) { c in
+            NewPracticeSetSheet(course: c, assessment: nil) { id in
+                model.newSetCourse = nil; model.selectedCourseID = c.id; model.selection = .courses; model.courseTabRequest = "practice"; model.openPracticeSetID = id
+            }
+        }
+        .sheet(item: $model.summaryRequest) { NotesSummarySheet(request: $0) }
+        .sheet(item: $model.prepRequest) { ExamPrepWizard(request: $0, app: model) }
         .buttonStyle(.secondary)
         .textFieldStyle(AppFieldStyle())
         .tint(Theme.accent)
@@ -28,7 +35,6 @@ struct RootView: View {
                 case .home: HomeView()
                 case .courses: CoursesView()
                 case .library: LibraryView()
-                case .questionBank: QuestionBankView()
                 case .aiTasks: AITaskCenterView()
                 case .skills: SkillsView()
                 case .insights: InsightsView()

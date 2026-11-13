@@ -8,16 +8,24 @@ public struct PracticeSet: Sendable, Equatable, Identifiable {
     public var fresh: Bool
     public var taskId: UUID?
     public var createdAt: Date
+    public var description: String? = nil
+    public var templateId: String? = nil
+    public var revision: Int = 1
+    public var updatedAt: Date? = nil
+    public var deletedAt: Date? = nil
 }
 
 public struct PracticeSetItem: Sendable, Equatable {
     public var slot: PlanSlot
     public var position: Int
     public var questionId: UUID?
-    public var origin: String?             // "reused" | "generated"; nil while the slot is still unfilled
+    public var origin: String?             // "reused" | "reused_topic" | "generated" | "added"; nil while the slot is still unfilled
+    /// A saved question built for this exact slot (topic, reasoning pattern, difficulty), or one chosen by topic alone when the learner allowed that.
+    public var isReused: Bool { origin == "reused" || origin == "reused_topic" }
+    public var isTopicOnlyReuse: Bool { origin == "reused_topic" }
 }
 
-public struct PreparedSet: Sendable, Equatable { public var set: PracticeSet; public var reused: Int; public var missing: Int; public var alreadyExisted: Bool }
+public struct PreparedSet: Sendable, Equatable { public var set: PracticeSet; public var reused: Int; public var missing: Int; public var alreadyExisted: Bool; public var topicOnly: Int = 0 }
 public struct SetGenerationReport: Sendable, Equatable { public var modelCalls: Int; public var filled: Int; public var missing: Int }
 
 public struct VerificationLabel: Sendable, Equatable {
@@ -42,8 +50,8 @@ public final class PracticeSetService: @unchecked Sendable {
     /// Plans a set and fills what it can from existing questions. Repeating the same request (same `requestKey`; by default the same configuration)
     /// returns the same set, so retries never duplicate it. `fresh: true` never reuses a question that already sits in any set, and always makes a new set.
     @discardableResult
-    public func prepare(courseId: UUID, assessmentId: UUID? = nil, params: GenerationParams, fresh: Bool = false, requestKey: String? = nil) throws -> PreparedSet {
-        let key = requestKey ?? (fresh ? UUID().uuidString : Self.configHash(params, assessmentId: assessmentId))
+    public func prepare(courseId: UUID, assessmentId: UUID? = nil, params: GenerationParams, fresh: Bool = false, requestKey: String? = nil, topicReuse: Bool = false) throws -> PreparedSet {
+        let key = requestKey ?? (fresh ? UUID().uuidString : Self.configHash(params, assessmentId: assessmentId) + (topicReuse ? "|topic" : ""))
         if let s = try existing(courseId: courseId, key: key) { return try summarize(s, alreadyExisted: true) }
         let scope = try AssessmentService(db: db).scope(courseId: courseId, assessmentId: assessmentId, requested: params.skillIds, tasks: ai)
         var p = params
@@ -60,11 +68,19 @@ public final class PracticeSetService: @unchecked Sendable {
             if try Int.fetchOne(d, sql: "SELECT COUNT(*) FROM practice_sets WHERE courseId = ? AND requestKey = ?", arguments: [courseId, key]) ?? 0 > 0 { return false }
             try d.execute(sql: "INSERT INTO practice_sets (id, courseId, assessmentId, title, requestKey, paramsJSON, fresh, taskId, createdAt) VALUES (?,?,?,?,?,?,?,NULL,?)", arguments: [id, courseId, assessmentId, title, key, pjson, fresh, Date()])
             var taken = Set<UUID>()
+            // Pass 1: questions built for this exact slot (topic + reasoning pattern + difficulty). Pass 2 runs only when the learner allowed topic-level reuse, and only
+            // for slots that found nothing: a saved question on the same topic and format within the difficulty range. It never applies to a slot that follows a learned
+            // instructor archetype or carries source exemplars (those keep the strict pattern rule), never crosses topics or courses, only takes questions without an open review flag, and is labelled "reused_topic".
+            var picks: [String: UUID] = [:]
+            var topicOnly: Set<String> = []
+            for slot in plan.slots { if let q = try Self.reusable(d, courseId: courseId, slot: slot, params: p, current: current, fresh: fresh, taken: taken) { taken.insert(q); picks[slot.id] = q } }
+            for slot in plan.slots where topicReuse && picks[slot.id] == nil && slot.archetypeKey == nil && slot.exemplars.isEmpty {
+                if let q = try Self.reusable(d, courseId: courseId, slot: slot, params: p, current: current, fresh: fresh, taken: taken, relaxed: true) { taken.insert(q); picks[slot.id] = q; topicOnly.insert(slot.id) }
+            }
             for (n, slot) in plan.slots.enumerated() {
-                let q = try Self.reusable(d, courseId: courseId, slot: slot, params: p, current: current, fresh: fresh, taken: taken)
-                if let q { taken.insert(q) }
+                let q = picks[slot.id]
                 try d.execute(sql: "INSERT INTO practice_set_items (setId, slotId, position, slotJSON, questionId, origin) VALUES (?,?,?,?,?,?)",
-                               arguments: [id, slot.id, n, String(data: try JSONEncoder().encode(slot), encoding: .utf8) ?? "{}", q, q == nil ? nil : "reused"])
+                               arguments: [id, slot.id, n, String(data: try JSONEncoder().encode(slot), encoding: .utf8) ?? "{}", q, q == nil ? nil : (topicOnly.contains(slot.id) ? "reused_topic" : "reused")])
             }
             try Self.saveMissingPlan(d, setId: id, plan: plan, courseId: courseId, assessmentId: assessmentId, params: p)
             return true
@@ -74,16 +90,17 @@ public final class PracticeSetService: @unchecked Sendable {
     }
 
     /// Compatible, current, unflagged questions for a slot, least-used first so repeated requests rotate instead of repeating.
-    static func reusable(_ d: Database, courseId: UUID, slot: PlanSlot, params: GenerationParams, current: [String: String], fresh: Bool, taken: Set<UUID>) throws -> UUID? {
+    static func reusable(_ d: Database, courseId: UUID, slot: PlanSlot, params: GenerationParams, current: [String: String], fresh: Bool, taken: Set<UUID>, relaxed: Bool = false) throws -> UUID? {
         let rows = try Row.fetchAll(d, sql: """
             SELECT l.questionId, l.archetypeKey, l.archetypeFingerprint, l.kind, l.topicKey, l.format, l.difficulty,
                    (SELECT COUNT(*) FROM practice_set_items i WHERE i.questionId = l.questionId) AS uses,
                    (SELECT COUNT(*) FROM attempts a WHERE a.questionId = l.questionId) AS attempts
             FROM question_archetype_links l JOIN questions q ON q.id = l.questionId
             WHERE l.courseId = ? AND q.archivedAt IS NULL
+              AND (? = 0 OR q.readiness IN ('verified', 'unverified'))
               AND NOT EXISTS (SELECT 1 FROM question_evidence e WHERE e.questionId = l.questionId AND e.result = 'failed')
             ORDER BY uses, attempts, l.createdAt
-            """, arguments: [courseId])
+            """, arguments: [courseId, relaxed ? 1 : 0])
         let topic = slot.topic.skillKey
         for r in rows {
             let qid: UUID = r["questionId"]
@@ -92,7 +109,7 @@ public final class PracticeSetService: @unchecked Sendable {
             guard (r["topicKey"] as String) == topic else { continue }
             if let k = slot.archetypeKey {
                 guard (r["archetypeKey"] as String?) == k, let fp = r["archetypeFingerprint"] as String?, current[k] == fp else { continue }   // built from an older version of the pattern: not reused
-            } else if (r["kind"] as String) != slot.archetype { continue }
+            } else if !relaxed, (r["kind"] as String) != slot.archetype { continue }
             if slot.format != "any", (r["format"] as String) != slot.format { continue }
             if !params.types.isEmpty, !params.types.contains(where: { $0.rawValue == (r["format"] as String) }) { continue }
             let diff: Int = r["difficulty"]
@@ -119,9 +136,11 @@ public final class PracticeSetService: @unchecked Sendable {
     func existing(courseId: UUID, key: String) throws -> PracticeSet? {
         try db.read { d in try Row.fetchOne(d, sql: "SELECT * FROM practice_sets WHERE courseId = ? AND requestKey = ?", arguments: [courseId, key]).map(Self.set) }
     }
-    static func set(_ r: Row) -> PracticeSet { PracticeSet(id: r["id"], courseId: r["courseId"], assessmentId: r["assessmentId"], title: r["title"], fresh: r["fresh"], taskId: r["taskId"], createdAt: r["createdAt"]) }
+    static func set(_ r: Row) -> PracticeSet { PracticeSet(id: r["id"], courseId: r["courseId"], assessmentId: r["assessmentId"], title: r["title"], fresh: r["fresh"], taskId: r["taskId"], createdAt: r["createdAt"],
+                                                        description: r["description"], templateId: r["templateId"], revision: r["revision"] ?? 1, updatedAt: r["updatedAt"], deletedAt: r["deletedAt"]) }
     public func practiceSet(_ id: UUID) throws -> PracticeSet? { try db.read { try Row.fetchOne($0, sql: "SELECT * FROM practice_sets WHERE id = ?", arguments: [id]).map(Self.set) } }
-    public func sets(courseId: UUID) throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE courseId = ? ORDER BY createdAt DESC", arguments: [courseId]).map(Self.set) } }
+    public func allSets() throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE deletedAt IS NULL ORDER BY createdAt DESC").map(Self.set) } }
+    public func sets(courseId: UUID) throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE courseId = ? AND deletedAt IS NULL ORDER BY createdAt DESC", arguments: [courseId]).map(Self.set) } }
 
     public func items(setId: UUID) throws -> [PracticeSetItem] {
         try db.read { d in try Row.fetchAll(d, sql: "SELECT slotJSON, position, questionId, origin FROM practice_set_items WHERE setId = ? ORDER BY position", arguments: [setId]).compactMap { r in
@@ -132,7 +151,7 @@ public final class PracticeSetService: @unchecked Sendable {
 
     func summarize(_ s: PracticeSet, alreadyExisted: Bool) throws -> PreparedSet {
         let it = try items(setId: s.id)
-        return PreparedSet(set: s, reused: it.filter { $0.origin == "reused" }.count, missing: it.filter { $0.questionId == nil }.count, alreadyExisted: alreadyExisted)
+        return PreparedSet(set: s, reused: it.filter(\.isReused).count, missing: it.filter { $0.questionId == nil }.count, alreadyExisted: alreadyExisted, topicOnly: it.filter(\.isTopicOnlyReuse).count)
     }
 
     /// Moves questions imported for the set's task into its slots. Idempotent; safe after any partial import, retry or restart.
@@ -207,16 +226,16 @@ public final class PracticeSetService: @unchecked Sendable {
     /// Starts (or resumes) a study session for a saved set presented by a template. The same questions can be practised under any compatible template;
     /// an unfinished session for the same (set, template) is reopened, so interrupted progress is never discarded.
     @discardableResult
-    public func startSession(setId: UUID, template: LearningTemplate, templates: TemplateService) throws -> (session: StudySession, resumed: Bool, skipped: [String]) {
+    public func startSession(setId: UUID, template: LearningTemplate, templates: TemplateService, newAttempt: Bool = false) throws -> (session: StudySession, resumed: Bool, skipped: [String]) {
         guard let s = try practiceSet(setId) else { throw AITaskError.notFound }
         let practice = PracticeService(db: db)
-        if let sid = try db.read({ try UUID.fetchOne($0, sql: "SELECT ps.sessionId FROM practice_set_sessions ps JOIN study_sessions s ON s.id = ps.sessionId WHERE ps.setId = ? AND ps.templateId = ? AND s.status != 'completed' ORDER BY ps.createdAt DESC", arguments: [setId, template.id]) }),
+        if !newAttempt, let sid = try db.read({ try UUID.fetchOne($0, sql: "SELECT ps.sessionId FROM practice_set_sessions ps JOIN study_sessions s ON s.id = ps.sessionId WHERE ps.setId = ? AND ps.templateId = ? AND s.status != 'completed' ORDER BY ps.createdAt DESC", arguments: [setId, template.id]) }),
            let existing = try? practice.session(sid) { return (existing, true, []) }
         let qs = try questions(setId: setId)
         let compat = templates.compatibility(template: template, items: qs.map { ($0.id, $0.spec, $0.topic) })
         guard !compat.usable.isEmpty else { throw PracticeError.noQuestions }
         let session = try practice.start(questionIds: compat.usable, title: "\(s.title) · \(template.name)", courseId: s.courseId, assessmentId: s.assessmentId)
-        try db.write { try $0.execute(sql: "INSERT OR IGNORE INTO practice_set_sessions (setId, templateId, sessionId, createdAt) VALUES (?,?,?,?)", arguments: [setId, template.id, session.id, Date()]) }
+        try db.write { try $0.execute(sql: "INSERT OR IGNORE INTO practice_set_sessions (setId, templateId, sessionId, createdAt, revision) VALUES (?,?,?,?,?)", arguments: [setId, template.id, session.id, Date(), s.revision]) }
         return (session, false, compat.skipped.map(\.reason))
     }
 

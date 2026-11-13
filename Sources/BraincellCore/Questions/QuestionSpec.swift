@@ -93,7 +93,9 @@ public struct ContentBlock: Codable, Hashable, Sendable {
 public struct Choice: Codable, Hashable, Sendable {
     public var id: String
     public var text: String
-    public init(id: String, text: String) { self.id = id; self.text = text }
+    /// Why this option is right or wrong. Optional: questions saved before this existed have none, and are never given invented ones.
+    public var why: String?
+    public init(id: String, text: String, why: String? = nil) { self.id = id; self.text = text; self.why = why }
 }
 
 public struct RubricItem: Codable, Hashable, Sendable {

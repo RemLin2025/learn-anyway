@@ -58,6 +58,12 @@ extension LibraryService {
             for x in try Document.fetchAll(d, sql: "SELECT * FROM documents WHERE deletedAt IS NOT NULL AND deletedWith IS NULL AND purgeAfter > ? AND \(Self.liveCourse)", arguments: [t]) {
                 out.append(DeletedItem(ref: LibraryRef(id: x.id, kind: Self.entry(x).kind), name: x.name, deletedAt: x.deletedAt!, purgeAfter: x.purgeAfter!, detail: Self.entry(x).kind.label))
             }
+            for r in try Row.fetchAll(d, sql: "SELECT s.id, s.title, s.deletedAt, (SELECT COUNT(*) FROM practice_set_items i WHERE i.setId = s.id) AS n FROM practice_sets s WHERE s.deletedAt IS NOT NULL") {
+                let at: Date = r["deletedAt"], until = at.addingTimeInterval(Self.retention)
+                guard until > t else { continue }
+                let n: Int = r["n"]
+                out.append(DeletedItem(ref: LibraryRef(id: r["id"], kind: .practiceSet), name: r["title"], deletedAt: at, purgeAfter: until, detail: "Practice set · \(n) question\(n == 1 ? "" : "s")"))
+            }
             return out.sorted { $0.deletedAt > $1.deletedAt }
         }
     }
@@ -78,6 +84,10 @@ extension LibraryService {
                 try d.execute(sql: "UPDATE library_folders SET deletedAt = NULL, purgeAfter = NULL, deletedWith = NULL WHERE id = ? OR deletedWith = ?", arguments: [ref.id, ref.id])
                 try d.execute(sql: "UPDATE documents SET deletedAt = NULL, purgeAfter = NULL, deletedWith = NULL WHERE deletedWith = ?", arguments: [ref.id])
                 try reparentIfOrphaned(d, folder: ref.id, file: nil)
+            case .practiceSet:
+                guard let at = try Date.fetchOne(d, sql: "SELECT deletedAt FROM practice_sets WHERE id = ? AND deletedAt IS NOT NULL", arguments: [ref.id]) else { throw LibraryError.notFound }
+                guard at.addingTimeInterval(Self.retention) > t else { throw LibraryError.expired }
+                try d.execute(sql: "UPDATE practice_sets SET deletedAt = NULL, updatedAt = ? WHERE id = ?", arguments: [t, ref.id])
             default:
                 guard let x = try Document.fetchOne(d, key: ref.id), x.deletedAt != nil else { throw LibraryError.notFound }
                 guard let p = x.purgeAfter, p > t else { throw LibraryError.expired }
@@ -107,6 +117,7 @@ extension LibraryService {
     public func purge(_ ref: LibraryRef) throws {
         switch ref.kind {
         case .courseFolder: try purgeCourse(ref.id)
+        case .practiceSet: try db.write { try $0.execute(sql: "DELETE FROM practice_sets WHERE id = ? AND deletedAt IS NOT NULL", arguments: [ref.id]) }   // its questions and past attempts are untouched
         case .folder:
             let paths = try db.write { d -> [String] in
                 let ps = try String.fetchAll(d, sql: "SELECT storedPath FROM documents WHERE deletedWith = ?", arguments: [ref.id])
@@ -145,6 +156,7 @@ extension LibraryService {
         var n = 0
         let courses = try db.read { try UUID.fetchAll($0, sql: "SELECT id FROM courses WHERE deletedAt IS NOT NULL AND purgedAt IS NULL AND purgeAfter <= ?", arguments: [t]) }
         for c in courses { try purgeCourse(c); n += 1 }
+        n += try db.write { d in try d.execute(sql: "DELETE FROM practice_sets WHERE deletedAt IS NOT NULL AND deletedAt <= ?", arguments: [t.addingTimeInterval(-Self.retention)]); return d.changesCount }
         let paths = try db.write { d -> [String] in
             let ps = try String.fetchAll(d, sql: "SELECT storedPath FROM documents WHERE deletedAt IS NOT NULL AND purgeAfter <= ?", arguments: [t])
             try d.execute(sql: "DELETE FROM documents WHERE deletedAt IS NOT NULL AND purgeAfter <= ?", arguments: [t])

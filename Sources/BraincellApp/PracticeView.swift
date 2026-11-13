@@ -114,7 +114,7 @@ struct PracticeView: View {
                 AnswerView(spec: spec, response: $pm.response, locked: pm.locked, fontSize: CGFloat(app.codeFontSize), pm: pm, onSubmit: pm.submit)
                 ConfidenceRow(pm: pm)
                 if !pm.examActive { hints(spec) }
-                if pm.locked { GradePanel(pm: pm, spec: spec); CoachBanner(pm: pm); ReferencePanel(spec: spec, response: pm.response, fontSize: CGFloat(app.codeFontSize)) }
+                if pm.locked { ReviewStack(pm: pm, spec: spec, fontSize: CGFloat(app.codeFontSize)) }
             }
             .padding(32).frame(maxWidth: 740, alignment: .leading).frame(maxWidth: .infinity)
         }
@@ -130,7 +130,7 @@ struct PracticeView: View {
                 VStack(alignment: .leading, spacing: 16) {
                     AnswerView(spec: spec, response: $pm.response, locked: pm.locked, fontSize: CGFloat(app.codeFontSize), pm: pm, onSubmit: pm.submit)
                     ConfidenceRow(pm: pm)
-                    if pm.locked { GradePanel(pm: pm, spec: spec); CoachBanner(pm: pm); ReferencePanel(spec: spec, response: pm.response, fontSize: CGFloat(app.codeFontSize)) }
+                    if pm.locked { ReviewStack(pm: pm, spec: spec, fontSize: CGFloat(app.codeFontSize)) }
                 }.padding(20).frame(maxWidth: .infinity, alignment: .leading)
             }.frame(minWidth: 340, idealWidth: 520)
             if showCoach && !pm.examActive {
@@ -241,27 +241,43 @@ struct AnswerView: View {
 
     private var choices: some View {
         let multi = spec.type == .multipleSelect
+        let review = locked ? AnswerReview(spec: spec, selected: response.selected) : nil
         return VStack(alignment: .leading, spacing: 8) {
             if multi { Text("Select all that apply").font(.subheadline).foregroundStyle(Theme.textSecondary) }
             ForEach(Array((spec.answer.choices ?? []).enumerated()), id: \.element.id) { i, c in
                 let on = response.selected.contains(c.id)
+                let row = review?.rows.first { $0.id == c.id }
+                let tint: Color? = row.flatMap { $0.isCorrect ? Theme.mastery : ($0.isSelected ? Theme.error : nil) }
+                let hot: Color? = tint ?? (on && !locked ? Theme.accent : nil)
                 Button {
                     if multi { if on { response.selected.removeAll { $0 == c.id } } else { response.selected.append(c.id) } }
                     else { response.selected = [c.id] }
                 } label: {
                     HStack(alignment: .top, spacing: 10) {
-                        Image(systemName: on ? (multi ? "checkmark.square.fill" : "largecircle.fill.circle") : (multi ? "square" : "circle"))
-                            .foregroundStyle(on ? Theme.accent : .secondary)
-                        RichText(text: c.text)
+                        if let row {
+                            Image(systemName: row.isCorrect ? "checkmark.circle.fill" : (row.isSelected ? "xmark.circle.fill" : "circle")).foregroundStyle(tint ?? Color.secondary.opacity(0.6))
+                        } else {
+                            Image(systemName: on ? (multi ? "checkmark.square.fill" : "largecircle.fill.circle") : (multi ? "square" : "circle"))
+                                .foregroundStyle(on ? Theme.accent : .secondary)
+                        }
+                        VStack(alignment: .leading, spacing: 4) {
+                            RichText(text: ChoiceMarkdown.text(c.text))
+                            if let row, row.isCorrect || row.isSelected {
+                                Text([row.isCorrect ? "Correct answer" : nil, row.isSelected ? "Your answer" : nil].compactMap { $0 }.joined(separator: " · "))
+                                    .font(.caption.weight(.semibold)).foregroundStyle(tint ?? Theme.textSecondary)
+                            }
+                        }
                         Spacer()
-                        if i < 9 { Text("\(i + 1)").font(.caption).foregroundStyle(Theme.textSecondary) }
+                        if i < 9, !locked { Text("\(i + 1)").font(.caption).foregroundStyle(Theme.textSecondary) }
                     }
-                    .padding(Theme.Space.md + 2).background(on ? Theme.accent.opacity(0.10) : Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control + 2))
-                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).strokeBorder(on ? Theme.accent : Theme.border, lineWidth: on ? 1.5 : 1))
+                    .padding(Theme.Space.md + 2).background(hot?.opacity(0.10) ?? Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control + 2))
+                    .overlay(RoundedRectangle(cornerRadius: Theme.Radius.control + 2).strokeBorder(hot ?? Theme.border, lineWidth: hot != nil ? 1.5 : 1))
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain).disabled(locked)
                 .keyboardShortcut(i < 9 ? KeyEquivalent(Character("\(i + 1)")) : .init("0"), modifiers: [])
-                .accessibilityLabel(c.text).accessibilityValue(on ? "Selected" : "Not selected")
+                .accessibilityLabel("\(AnswerReview.label(i)). \(c.text)")
+                .accessibilityValue(row.map { r in [r.isCorrect ? "Correct answer" : "Incorrect", r.isSelected ? "Your answer" : nil].compactMap { $0 }.joined(separator: ", ") } ?? (on ? "Selected" : "Not selected"))
                 .accessibilityAddTraits(on ? .isSelected : [])
             }
         }
@@ -280,6 +296,28 @@ struct AnswerView: View {
             Text(spec.type == .derivationProof ? "Write your derivation or proof" : "Write your explanation").font(.subheadline).foregroundStyle(Theme.textSecondary)
             Text("Use Insert Math for symbols and templates, or type $…$ for inline math and $$…$$ for display math.").font(.caption).foregroundStyle(Theme.textSecondary)
             MathInputField(text: $response.text, prose: true, locked: locked, fontSize: fontSize, minHeight: 200, label: "Written answer")
+        }
+    }
+}
+
+/// Everything after submission, in reading order: the compact grade line, the answer review, the tutor, then any coach note.
+struct ReviewStack: View {
+    @ObservedObject var pm: PracticeModel
+    let spec: QuestionSpec
+    let fontSize: CGFloat
+    private var isChoice: Bool { spec.type == .singleChoice || spec.type == .multipleSelect }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            GradePanel(pm: pm, spec: spec)
+            if isChoice {
+                Label("Submitted — your attempt is saved and can’t be changed", systemImage: "lock.fill").font(.caption).foregroundStyle(Theme.textSecondary)
+                AnswerReviewSection(pm: pm, spec: spec) { pm.tutor()?.send("Explain why each option is right or wrong.") }
+            } else {
+                ReferencePanel(spec: spec, response: pm.response, fontSize: fontSize)
+            }
+            if let t = pm.tutor() { TutorSection(tutor: t) }
+            if pm.coachSuggestion?.trigger != .repeatedMistakes { CoachBanner(pm: pm) }      // the “A couple of misses” card is gone; the session summary carries that signal
         }
     }
 }

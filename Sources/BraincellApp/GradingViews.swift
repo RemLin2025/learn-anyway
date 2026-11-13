@@ -25,6 +25,14 @@ struct GradePanel: View {
     var body: some View {
         if let r = pm.result {
             let e = r.evaluation
+            if e.state == .graded, spec.type == .singleChoice || spec.type == .multipleSelect {
+                // The options themselves show right and wrong; here only what is still useful: XP, and a way to disagree.
+                HStack(spacing: 12) {
+                    if r.xp != 0 { Label("+\(r.xp) XP", systemImage: "sparkles").font(.callout.weight(.medium)).foregroundStyle(Theme.accent).accessibilityLabel("\(r.xp) experience points earned") }
+                    Spacer()
+                    disagreeMenu
+                }
+            } else {
             Card {
                 VStack(alignment: .leading, spacing: 10) {
                     switch e.state {
@@ -55,6 +63,7 @@ struct GradePanel: View {
                             .accessibilityLabel("\(r.xp) experience points earned")
                     }
                 }
+            }
             }
         }
     }

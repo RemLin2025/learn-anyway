@@ -2,14 +2,13 @@ import SwiftUI
 import BraincellCore
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case home = "Home", courses = "Courses", library = "Library", questionBank = "Question Bank", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
+    case home = "Home", courses = "Courses", library = "Library", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .home: "house"
         case .courses: "graduationcap"
         case .library: "books.vertical"
-        case .questionBank: "rectangle.stack"
         case .skills: "point.3.connected.trianglepath.dotted"
         case .insights: "chart.line.uptrend.xyaxis"
         case .aiTasks: "tray.and.arrow.up"
@@ -55,6 +54,11 @@ final class AppModel: ObservableObject {
     /// Set by chat chips / lists: the course screen opens this practice set.
     @Published var openPracticeSetID: UUID?
     @Published var courseTabRequest: String?
+    lazy var librarySearch: LibrarySearchService? = { guard let db, let library, let questions, let templates else { return nil }; return LibrarySearchService(db: db, library: library, questions: questions, templates: templates) }()
+    lazy var favorites: LibraryFavorites? = db.map { LibraryFavorites(db: $0) }
+    lazy var libraryViews: LibraryViews? = db.map { LibraryViews(db: $0) }
+    lazy var noteSummaries: NoteSummaryService? = db.map { NoteSummaryService(db: $0, gateway: gateway) }
+    lazy var tutorService: QuestionTutorService? = db.map { QuestionTutorService(db: $0, gateway: gateway) }
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
     lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()
@@ -94,6 +98,13 @@ final class AppModel: ObservableObject {
     @Published var practiceSetup: PracticeSetupRequest?
     /// Set by chat's View Questions: the Question Bank opens filtered to this course, then clears it.
     @Published var questionBankCourse: UUID?
+    @Published var librarySection: LibrarySection = .materials
+    @Published var prepRequest: PrepRequest?
+    @Published var summaryRequest: SummaryRequest?
+    @Published var newSetCourse: Course?
+    @Published var librarySearchSeed: String?
+    @Published var questionFocus: UUID?
+    @Published var questionSearchSeed: String?
     var agentStore: AgentStore? { db.map { AgentStore(db: $0) } }
 
     init(databaseURL: URL? = nil, storage: ManagedStorage = AppModel.defaultStorage()) {
@@ -269,14 +280,52 @@ final class AppModel: ObservableObject {
     }
 
     /// Starts (or resumes) a session for a saved practice set in a template. Questions are never regenerated.
-    func startSetSession(setId: UUID, template: LearningTemplate) {
+    func startSetSession(setId: UUID, template: LearningTemplate, newAttempt: Bool = false) {
         perform {
             guard let practiceSets, let templates else { return }
-            let r = try practiceSets.startSession(setId: setId, template: template, templates: templates)
+            let r = try practiceSets.startSession(setId: setId, template: template, templates: templates, newAttempt: newAttempt)
             activeSessionID = r.session.id
             if !r.skipped.isEmpty { alertMessage = "\(r.skipped.count) question(s) aren’t part of \(template.name) and were left out of this session." }
         }
     }
+
+    /// The guided exam-preparation workflow, optionally prefilled. Chat, Home and the course page all open this same sheet.
+    func openExamPrep(courseId: UUID? = nil, assessment: String? = nil) { prepRequest = PrepRequest(courseId: courseId ?? selectedCourseID, assessmentName: assessment) }
+
+    /// Sends the learner to the Library section that owns a search/favorite hit, focused on it where that section supports it.
+    func openLibraryHit(_ h: LibraryHit, query: String = "", all: Bool = false) {
+        switch h.kind {
+        case .course: if let c = h.courseId { selectedCourseID = c; selection = .courses }
+        case .material: librarySearchSeed = query.isEmpty ? h.title : query; librarySection = .materials; selection = .library
+        case .question: questionFocus = all ? nil : UUID(uuidString: h.key); questionSearchSeed = all ? query : nil; librarySection = .questions; selection = .library
+        case .practiceSet: openPracticeSetID = all ? nil : UUID(uuidString: h.key); librarySection = .practiceSets; selection = .library
+        case .template: librarySection = .templates; selection = .library
+        case .summary: summaryRequest = SummaryRequest(courseId: h.courseId)
+        }
+    }
+
+    private var focusCourse: Course? { courseList.first { $0.id == selectedCourseID } ?? courseList.first }
+
+    /// Home launchers. Each opens a real feature; none sends a canned chat message, and none calls a model just to decide what to do.
+    func openNewPracticeSet() {
+        guard let c = focusCourse else { alertMessage = "Create a course first; practice sets belong to a course."; return }
+        newSetCourse = c
+    }
+    /// Skills with recent misses come from saved evidence (no model); they preselect topic practice.
+    func reviewWeaknesses() {
+        guard let c = focusCourse else { alertMessage = "Create a course first."; return }
+        let weak = ((try? history?.weakSpots(courseId: c.id)) ?? []).map(\.skill.id)
+        if weak.isEmpty { alertMessage = "No weak spots yet for \(c.name): they appear after a few graded answers with repeated misses. You can still practise by topic." ; practiceSetup = PracticeSetupRequest(courseId: c.id); return }
+        practiceSetup = PracticeSetupRequest(courseId: c.id, skillIds: Set(weak))
+    }
+    func openSummaries(courseId: UUID? = nil) { summaryRequest = SummaryRequest(courseId: courseId ?? selectedCourseID) }
+    func quickCram() {
+        guard let c = focusCourse else { alertMessage = "Create a course first."; return }
+        practiceSetup = PracticeSetupRequest(courseId: c.id, cram: true)
+    }
+
+    /// Old Question Bank entry points land in the Library's Questions section (optionally filtered to one course).
+    func openQuestionBank(course: UUID? = nil) { questionBankCourse = course; librarySection = .questions; selection = .library }
 
     func practiceCourse(_ course: Course, assessment: Assessment? = nil) {
         perform {

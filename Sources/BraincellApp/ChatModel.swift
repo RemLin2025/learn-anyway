@@ -92,7 +92,18 @@ final class ChatModel: ObservableObject {
         let op = UUID(); currentOp = op
         let r = runner, ev = events(op: op, conv: conv)
         thinking = true; stage = nil
-        task = Task { await work(r, ev); await MainActor.run { guard self.currentOp == op else { return }; self.thinking = false; self.stage = nil; self.task = nil; self.reload() } }
+        let seen = Set(messages.map(\.id))
+        task = Task { await work(r, ev); await MainActor.run { guard self.currentOp == op else { return }; self.thinking = false; self.stage = nil; self.task = nil; self.reload(); self.autoOpenWorkflow(after: seen) } }
+    }
+
+    /// When the assistant just launched the exam-preparation workflow (and only then, never when an old conversation is reopened), open it directly
+    /// with the course and assessment prefilled. The button stays in the transcript to reopen it later. The window can open from here because the learner
+    /// just asked for it; nothing else is triggered automatically.
+    private func autoOpenWorkflow(after seen: Set<UUID>) {
+        for m in messages where !seen.contains(m.id) && m.kind == .actions {
+            let chips = (m.payload.flatMap { try? JSONDecoder().decode([ActionChip].self, from: Data($0.utf8)) }) ?? []
+            if let c = chips.first(where: { $0.action == "prepareExam" && $0.label == ExamPrepCoordinator.openChipLabel }) { perform(c); return }
+        }
     }
 
     // MARK: Attachments (imported through the Library, so Materials and Library show them too)
@@ -127,18 +138,18 @@ final class ChatModel: ObservableObject {
     func perform(_ chip: ActionChip) {
         switch chip.action {
         case "openCourse": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses }
-        case "openPracticeSet": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses; app.courseTabRequest = "assessments"; app.openPracticeSetID = chip.setId }
+        case "openPracticeSet": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses; app.courseTabRequest = "practice"; app.openPracticeSetID = chip.setId }
         case "openLibrary": app.selection = .library
-        case "openQuestionBank": app.questionBankCourse = chip.courseId; app.selection = .questionBank
+        case "openQuestionBank": app.openQuestionBank(course: chip.courseId)
         case "openSkills": if let id = chip.courseId { app.selectedCourseID = id }; app.selection = .skills
         case "addFiles": pickFiles(into: chip.courseId, thenSend: true)
         case "startPractice":
             if let p = chip.planId { startPlanDay(planId: p, dayIndex: chip.dayIndex ?? 0) }
             else if let id = chip.courseId { app.practiceSetup = PracticeSetupRequest(courseId: id, assessmentId: chip.assessmentId) }
         case "prepareExam":
-            // Resume or regenerate: the job is idempotent, so this continues from the saved stage and skips finished work.
-            let c = app.courseList.first { $0.id == chip.courseId }?.name ?? "my course", a = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
-            draft = "Prepare \(a ?? "my exam") in \(c)."; send()
+            // Opens the same guided workflow (and resumes the saved job): the chat never re-implements the stages.
+            let name = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
+            app.openExamPrep(courseId: chip.courseId, assessment: name)
         case "startReviews": app.startReviews()
         case "resumeSession": if let s = app.resumableSession { app.activeSessionID = s.id } else { app.alertMessage = "There is no unfinished session to resume." }
         case "openPlan": if let p = chip.planId, let conv = try? store.plan(p)?.conversationId { open(conv) }
