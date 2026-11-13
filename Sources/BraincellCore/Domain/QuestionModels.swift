@@ -72,6 +72,8 @@ public struct SavedView: Codable, Sendable, Identifiable, Hashable, FetchableRec
     public var name: String
     public var filterJSON: String
     public var createdAt: Date
+    /// Which Library section the view belongs to: questions, materials, practiceSets or templates.
+    public var category: String = "questions"
 }
 
 // MARK: AI bridge records

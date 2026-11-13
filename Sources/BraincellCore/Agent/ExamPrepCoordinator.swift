@@ -58,7 +58,7 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
     public func analyze(_ jobId: UUID, stage: @escaping @Sendable (String) -> Void = { _ in }) async throws -> StudyPrepJob {
         guard let j = try job(jobId), let course = try c.courses.courses(includeArchived: true).first(where: { $0.id == j.courseId }) else { throw ToolError.unavailable("That preparation no longer exists.") }
         let name = try j.assessmentId.flatMap { id in try c.courses.assessments(courseId: course.id).first { $0.id == id }?.name }
-        _ = try await StudyPrep.run(course: course, assessmentName: name, analysisOnly: true, conversationId: try liveConversation(j.conversationId, course: course), c, stage: stage)
+        _ = try await StudyPrep.run(course: course, assessmentName: name, conversationId: try liveConversation(j.conversationId, course: course), c, stage: stage)
         return try job(jobId) ?? j
     }
 
@@ -101,14 +101,14 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
 
     /// Stage 6: how many saved questions fit and how many would be generated. Creates (or replaces) the planned set but calls no model.
     @discardableResult
-    public func plan(_ id: UUID, count: Int, minDifficulty: Int = 1, maxDifficulty: Int = 5, types: [QuestionType] = [], fresh: Bool = false, generateMissing: Bool = true) throws -> Plan {
+    public func plan(_ id: UUID, count: Int, minDifficulty: Int = 1, maxDifficulty: Int = 5, types: [QuestionType] = [], fresh: Bool = false, generateMissing: Bool = true, requestKey: String? = nil) throws -> Plan {
         guard let j = try job(id) else { throw ToolError.unavailable("That preparation no longer exists.") }
         let skills = try includedSkillIds(j)
         var params = GenerationParams(count: max(1, min(count, 60)), types: types, minDifficulty: minDifficulty, maxDifficulty: maxDifficulty, skillIds: skills, documentIds: [], mode: .matchInstructorStyle)
         params.notes = "Exam preparation questions for \(j.assessmentId.map { _ in "the assessment" } ?? "the course"). Generated practice, not the real exam."
         // A changed plan replaces the unused set from the previous plan; a set that already has attempts is never touched.
         if let old = j.state.setId, (try c.practiceSets.progress(setId: old)).state == .notStarted { try c.practiceSets.delete(setId: old) }
-        let p = try c.practiceSets.prepare(courseId: j.courseId, assessmentId: j.assessmentId, params: params, fresh: fresh)
+        let p = try c.practiceSets.prepare(courseId: j.courseId, assessmentId: j.assessmentId, params: params, fresh: fresh, requestKey: requestKey)
         if let t = j.state.templateId { try c.practiceSets.update(setId: p.set.id, templateId: t) }
         _ = try mutate(id) { $0.params = params; $0.setId = p.set.id; $0.wizardStep = "create" }
         return Plan(set: p.set, reused: p.reused, missing: generateMissing ? p.missing : 0)
@@ -122,5 +122,61 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
         var s = j.state; s.modelCalls += r.modelCalls; s.accepted += r.filled
         try StudyPrep.save(&j2, s, c, stage: .completed, status: r.missing == 0 ? .completed : .partial, error: r.missing == 0 ? nil : "\(r.missing) question(s) could not be generated; run it again to retry only those.")
         return r
+    }
+
+    // MARK: One-shot path (chat's `exam.prepare` and any older caller)
+
+    /// Runs every stage without stopping for review, through exactly the same job, analysis cache, study map, plan and generation as the wizard.
+    /// A second call with unchanged sources reuses everything and makes no model call; `regenerate` plans a fresh set (saved questions are still reused where they fit).
+    public func runAll(course: Course, assessmentName: String, regenerate: Bool = false, conversationId: UUID, stage: @escaping @Sendable (String) -> Void = { _ in }) async throws -> ToolOutput {
+        let job = try start(course: course, assessmentName: assessmentName, conversationId: conversationId)
+        let mat = try materials(courseId: course.id, job: job)
+        guard !mat.readable.isEmpty else {
+            return ToolOutput(text: "\(course.name) has no readable materials, so nothing could be organized or generated. Ask the learner to add text-based notes, slides or a syllabus (PDF, Markdown, TXT or pasted text). Do not infer the content from the course name.", summary: "No readable materials",
+                              chips: [ActionChip(label: "Add materials", action: "addFiles", courseId: course.id)])
+        }
+        let before = currentPlan(job.id)
+        let analyzed = try await analyze(job.id, stage: stage)
+        guard analyzed.state.mapId != nil else {
+            return ToolOutput(text: "Stopped at “\(analyzed.stage.label)”: \(analyzed.error ?? "the analysis did not finish"). Progress is saved. Tell the learner they can resume and it continues without repeating finished work.", summary: "Paused at \(analyzed.stage.label)",
+                              chips: [ActionChip(label: "Resume preparation", action: "prepareExam", courseId: course.id, assessmentId: analyzed.assessmentId)])
+        }
+        let cached = !regenerate && analyzed.status == .completed && before != nil && before?.missing == 0 && !mat.analysisStale
+        var plan: Plan
+        if cached, let b = before { plan = b } else {
+            let n = min(30, max(10, analyzed.state.topicCount * 2))
+            plan = try self.plan(job.id, count: n, fresh: regenerate, requestKey: regenerate ? "regen-" + UUID().uuidString : nil)
+        }
+        do {
+            if plan.missing > 0 { stage("Generating \(plan.missing) new question(s)"); _ = try await generate(job.id) }
+        } catch is CancellationError { throw CancellationError() }
+        catch {
+            let why = (error as? GatewayError).map { AgentRunner.hint(for: $0) } ?? error.localizedDescription
+            var j = try job2(job.id); try? StudyPrep.save(&j, j.state, c, status: .paused, error: why)
+            return ToolOutput(text: "Stopped while generating questions: \(why)\nThe study map (\(analyzed.state.topicCount) topic(s)) and the planned practice set are saved. Tell the learner they can resume and only the missing questions are generated.", summary: "Paused at question generation",
+                              chips: [ActionChip(label: "Resume preparation", action: "prepareExam", courseId: course.id, assessmentId: analyzed.assessmentId)])
+        }
+        var j = try job2(job.id)
+        if j.status != .completed, let cp = currentPlan(job.id), cp.missing == 0 { try StudyPrep.save(&j, j.state, c, stage: .completed, status: .completed) }
+        return try summary(job.id, cached: cached)
+    }
+
+    private func job2(_ id: UUID) throws -> StudyPrepJob { guard let j = try job(id) else { throw ToolError.unavailable("That preparation no longer exists.") }; return j }
+
+    func summary(_ id: UUID, cached: Bool) throws -> ToolOutput {
+        let j = try job2(id), s = j.state
+        guard let p = currentPlan(id), let course = try c.courses.courses(includeArchived: true).first(where: { $0.id == j.courseId }) else { return ToolOutput(text: "Preparation saved.", summary: "Saved") }
+        let have = try c.practiceSets.items(setId: p.set.id).filter { $0.questionId != nil }
+        let asmName = try j.assessmentId.flatMap { a in try c.courses.assessments(courseId: course.id).first { $0.id == a }?.name } ?? "the course"
+        var t = "\(cached ? "Already prepared (sources unchanged). " : "")Preparation for \(asmName) in \(course.name) is saved: \(s.topicCount) topic(s) (\(s.topicsWithSources) with verified source references) and the practice set “\(p.set.title)” with \(have.count) question(s) (\(p.reused) reused from saved questions)"
+        t += p.missing > 0 ? ", \(p.missing) still to generate." : "."
+        t += " New questions are structurally validated and marked Unverified, not independently checked. Priorities are study estimates unless a topic says instructor-stated."
+        if !s.gaps.isEmpty { t += " Not fully readable: " + s.gaps.joined(separator: ", ") + "." }
+        t += " Tell the learner in a few sentences, using exactly these numbers. Do not call more tools."
+        let cid = course.id
+        return ToolOutput(text: t, summary: "\(s.topicCount) topics, \(have.count) questions", mapId: s.mapId, chips: [
+            ActionChip(label: "Open practice set", action: "openPracticeSet", courseId: cid, assessmentId: j.assessmentId, setId: p.set.id),
+            ActionChip(label: "Start Practice", action: "startPractice", courseId: cid, assessmentId: j.assessmentId), ActionChip(label: "View Topics", action: "openSkills", courseId: cid),
+            ActionChip(label: "View Questions", action: "openQuestionBank", courseId: cid), ActionChip(label: "Review Sources", action: "openCourse", courseId: cid), ActionChip(label: "Regenerate Questions", action: "prepareExam", courseId: cid, assessmentId: j.assessmentId)])
     }
 }

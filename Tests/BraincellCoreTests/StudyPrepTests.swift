@@ -15,11 +15,12 @@ extension AgentTests {
 
     func prepEnv(modelFailsOnQuestions: Bool = false) async throws -> (E, Course) {
         let box = LockedBox<Int>(0)
+        let m = SetModel()
         let e = try await env { _, user, _ in
             if user.contains("You analyze course material") { return Self.topicsJSON }
             if user.contains("req-") {
                 if modelFailsOnQuestions && box.withLock({ $0 += 1; return $0 }) == 1 { return "" }
-                return Fx.envelope(self.requestId(user), Array(Fx.all.prefix(3)))
+                return m.reply(user, analysis: "{}")
             }
             return "ok"
         }
@@ -30,7 +31,7 @@ extension AgentTests {
         return (e, c)
     }
     func prep(_ e: E, _ c: Course, regenerate: Bool = false) async throws -> ToolOutput {
-        try await StudyPrep.run(course: c, assessmentName: "Midterm 3", regenerate: regenerate, conversationId: e.conv, e.ctx, stage: { _ in })
+        try await ExamPrepCoordinator(e.ctx).runAll(course: c, assessmentName: "Midterm 3", regenerate: regenerate, conversationId: e.conv)
     }
     func questionCount(_ e: E) throws -> Int { try e.db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM questions") ?? 0 } }
 
@@ -46,8 +47,10 @@ extension AgentTests {
         let asms = try e.ctx.courses.assessments(courseId: c.id)
         #expect(asms.count == 1 && asms[0].name == "Midterm 3" && asms[0].deadline == nil)          // created once, no invented date
         #expect(try e.ctx.courses.scopedSkills(assessmentId: asms[0].id).count == 3)
-        #expect(out.text.contains("\(job.state.accepted) practice question") && ["openSkills", "openQuestionBank", "startPractice", "openCourse", "prepareExam"].allSatisfy { a in out.chips.contains { $0.action == a } })
-        #expect(e.script.count == 1 + (try e.ctx.ai.batches(taskId: job.state.taskId!).count))     // one topic call + one per question batch, nothing repeated
+        #expect(out.text.contains("practice set") && ["openPracticeSet", "openSkills", "openQuestionBank", "startPractice", "openCourse", "prepareExam"].allSatisfy { a in out.chips.contains { $0.action == a } })
+        let topicCalls = e.script.prompts.filter { $0.user.contains("You analyze course material") }.count, genCalls = e.script.prompts.filter { $0.user.contains("req-") }.count
+        #expect(topicCalls == 1 && genCalls >= 1 && e.script.count == topicCalls + genCalls)     // one topic call + the generation calls for the planned set, nothing repeated
+        #expect(try e.ctx.practiceSets.sets(courseId: c.id).count == 1)
     }
 
     @Test func rerunWithUnchangedSourcesReusesSavedWorkAndNeverDuplicatesAssessments() async throws {
@@ -124,7 +127,7 @@ extension AgentTests {
         try insertChunk(e, d, 0, page: 1, "Chapter 2 is worth 40% of the exam grade."); try insertChunk(e, d, 1, page: 2, "Maximum likelihood example.")
         await ask(e, "Help me prepare for Midterm 3 in STOR435")
         let tools = try toolMessages(e)
-        #expect(tools.count == 1 && tools[0].content.contains("practice question"))
+        #expect(tools.count == 1 && tools[0].content.contains("practice set"))
         #expect(try msgs(e).last?.content == "Your Midterm 3 preparation is ready." && (try msgs(e).contains { $0.kind == .actions && ($0.payload ?? "").contains("startPractice") }))
     }
 }

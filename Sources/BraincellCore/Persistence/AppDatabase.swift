@@ -923,16 +923,6 @@ public final class AppDatabase: Sendable {
             }
             try db.create(index: "worksheet_annotations_on_sheet", on: "worksheet_annotations", columns: ["worksheetId", "page"])
         }
-        m.registerMigration("v23_practice_set_editing") { db in           // additive: existing sets keep working and start at revision 1
-            try db.alter(table: "practice_sets") { t in
-                t.add(column: "description", .text)
-                t.add(column: "templateId", .text)                      // the template the learner last chose for this set (global templates, by id)
-                t.add(column: "revision", .integer).notNull().defaults(to: 1)
-                t.add(column: "updatedAt", .datetime)
-                t.add(column: "deletedAt", .datetime)                   // soft delete: recoverable, questions and past sessions are never touched
-            }
-            try db.alter(table: "practice_set_sessions") { t in t.add(column: "revision", .integer).notNull().defaults(to: 1) }
-        }
         m.registerMigration("v22_question_tutor") { db in
             try db.create(table: "question_tutor_messages") { t in      // one short conversation per attempt; additive, nothing else changes
                 t.primaryKey("id", .blob)
@@ -943,6 +933,38 @@ public final class AppDatabase: Sendable {
                 t.column("createdAt", .datetime).notNull()
             }
             try db.create(index: "question_tutor_messages_on_attempt", on: "question_tutor_messages", columns: ["attemptId", "createdAt"])
+        }
+        m.registerMigration("v23_practice_set_editing") { db in           // additive: existing sets keep working and start at revision 1
+            try db.alter(table: "practice_sets") { t in
+                t.add(column: "description", .text)
+                t.add(column: "templateId", .text)                      // the template the learner last chose for this set (global templates, by id)
+                t.add(column: "revision", .integer).notNull().defaults(to: 1)
+                t.add(column: "updatedAt", .datetime)
+                t.add(column: "deletedAt", .datetime)                   // soft delete: recoverable, questions and past sessions are never touched
+            }
+            try db.alter(table: "practice_set_sessions") { t in t.add(column: "revision", .integer).notNull().defaults(to: 1) }
+        }
+        m.registerMigration("v24_library_universal") { db in               // additive
+            try db.alter(table: "saved_views") { t in t.add(column: "category", .text).notNull().defaults(to: "questions") }   // existing views stay Question views
+            try db.create(table: "library_favorites") { t in               // starred questions, practice sets and templates (files keep documents.favorite)
+                t.column("kind", .text).notNull()                          // question | practiceSet | template
+                t.column("itemId", .text).notNull()
+                t.column("createdAt", .datetime).notNull()
+                t.primaryKey(["kind", "itemId"])
+            }
+            try db.create(table: "note_summaries") { t in                  // one saved summary per (document content, prompt version)
+                t.primaryKey("id", .blob)
+                t.column("courseId", .blob).references("courses", onDelete: .cascade)
+                t.column("documentId", .blob).notNull()                    // no FK: a summary outlives a purged source and says which file it came from
+                t.column("documentName", .text).notNull()
+                t.column("documentSha", .text).notNull()
+                t.column("promptVersion", .integer).notNull()
+                t.column("content", .text).notNull()
+                t.column("coverage", .text).notNull()                      // "full" or a note saying how much of a long document was read
+                t.column("model", .text)
+                t.column("createdAt", .datetime).notNull()
+                t.uniqueKey(["documentId", "documentSha", "promptVersion"])
+            }
         }
         return m
     }

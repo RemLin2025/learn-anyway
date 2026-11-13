@@ -98,7 +98,9 @@ public enum StudyPrep {
 
     /// Starts a job, or resumes the unfinished one for this course/assessment. Re-running a completed job with unchanged sources
     /// returns the saved result without calling the model.
-    public static func run(course: Course, assessmentName: String?, regenerate: Bool = false, analysisOnly: Bool = false, conversationId: UUID, _ c: AgentContext, stage report: @escaping @Sendable (String) -> Void) async throws -> ToolOutput {
+    /// Stages 1–5 of preparation: assessment, source check, topic analysis → saved study map. Everything after this (template, practice settings, question reuse and
+    /// generation) belongs to `ExamPrepCoordinator`, the one canonical workflow. Reuses the saved map while the sources are unchanged; resumes a failed analysis.
+    static func run(course: Course, assessmentName: String?, conversationId: UUID, _ c: AgentContext, stage report: @escaping @Sendable (String) -> Void) async throws -> ToolOutput {
         // Assessment: reuse by name, create once from the learner's request. Never invents a date or scope.
         var asm: Assessment?
         if let n = assessmentName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
@@ -112,10 +114,10 @@ public enum StudyPrep {
         }
         let existing = try jobs(courseId: course.id, c.db).first { $0.assessmentId == asm?.id }
         var job: StudyPrepJob
-        if let e = existing, e.status != .completed || !regenerate, e.status != .cancelled { job = e; job.conversationId = conversationId; job.status = .running }
+        if let e = existing, e.status != .cancelled { job = e; job.conversationId = conversationId; job.status = .running }
         else { job = StudyPrepJob(id: UUID(), conversationId: conversationId, courseId: course.id, assessmentId: asm?.id, stage: .created, status: .running, stateJSON: "{}", error: nil, createdAt: c.now(), updatedAt: c.now()) }
         var s = job.state
-        if regenerate, existing?.status == .completed { s.taskId = nil; s.doneBatches = []; s.accepted = 0; s.duplicates = 0; s.rejected = 0; job.stage = .weightAnalysis }
+        let wasCompleted = existing?.status == .completed
         try save(&job, s, c, status: .running)
 
         // 1–2. Source discovery and extraction state (already extracted and hashed at import; nothing is re-read unless it changed).
@@ -131,8 +133,8 @@ public enum StudyPrep {
         }
         let fp = fingerprint(readable)
         let stale = !s.fingerprint.isEmpty && s.fingerprint != fp
-        if stale { s.mapId = nil; s.taskId = nil; s.doneBatches = []; s.accepted = 0; s.duplicates = 0; s.rejected = 0; s.log = ["Sources changed since last time; re-analyzing"] }
-        if existing?.status == .completed, !stale, !regenerate, !analysisOnly { return summary(job, s, course, asm, cached: true) }
+        // Only what depends on the changed files is dropped: the study map and the plan built from it. Template and practice settings stay.
+        if stale { s.mapId = nil; s.taskId = nil; s.doneBatches = []; s.accepted = 0; s.duplicates = 0; s.rejected = 0; s.setId = nil; s.log = ["Sources changed since last time; re-analyzing"] }
         s.fingerprint = fp; s.sourceCount = readable.count; s.gaps = gaps
         if !s.log.contains("Found \(readable.count) readable source(s)") { s.log.append("Found \(readable.count) readable source(s)") }
         try save(&job, s, c, stage: .extraction)
@@ -153,30 +155,19 @@ public enum StudyPrep {
                 }
                 s.log.append("Identified \(s.topicCount) topic(s)")
                 try save(&job, s, c, stage: .weightAnalysis)
+                s.log.append("Analyzed study priorities")
             }
-            s.log.append("Analyzed study priorities")
-            if analysisOnly {           // the guided workflow stops here so the learner can review and edit the study map before anything is generated
-                if job.status != .completed { try save(&job, s, c, stage: .weightAnalysis, status: .awaitingReview) } else { try save(&job, s, c) }
-                return summary(job, s, course, asm, cached: false)
-            }
-
-            // 6–8. Questions in bounded batches. A finished batch is never regenerated on resume.
-            report("Generating practice questions")
-            try save(&job, s, c, stage: .questionGeneration)
-            try await generate(course: course, asm: asm, readable: readable, state: &s, job: &job, c, report)
-            try save(&job, s, c, stage: .completed, status: .completed)
-            return summary(job, s, course, asm, cached: false)
+            // The learner reviews the map before anything is generated. A job that already finished keeps its status.
+            if wasCompleted && !stale { try save(&job, s, c, stage: job.stage, status: .completed) } else { try save(&job, s, c, stage: .weightAnalysis, status: .awaitingReview) }
+            return ToolOutput(text: "Study map ready: \(s.topicCount) topic(s).", summary: "\(s.topicCount) topics", mapId: s.mapId)
         } catch is CancellationError {
             try? save(&job, s, c, status: .cancelled, error: "Cancelled")
             throw CancellationError()
         } catch {
             // Keep everything already saved; the stage that failed is where "resume" continues.
             let why = (error as? GatewayError).map { AgentRunner.hint(for: $0) } ?? error.localizedDescription
-            let done = s.mapId != nil
-            try? save(&job, s, c, status: done && s.accepted > 0 ? .partial : .paused, error: why)
-            var text = "Stopped at “\(job.stage.label)”: \(why)\nProgress is saved (\(s.topicCount) topic(s), \(s.accepted) question(s) so far). Tell the learner they can resume and it continues from this stage without repeating finished work."
-            if s.mapId != nil { text += " Topics were already saved." }
-            return ToolOutput(text: text, summary: "Paused at \(job.stage.label)", chips: [ActionChip(label: "Resume preparation", action: "prepareExam", courseId: course.id, assessmentId: asm?.id)])
+            try? save(&job, s, c, status: .paused, error: why)
+            return ToolOutput(text: "Stopped at “\(job.stage.label)”: \(why)\nProgress is saved. Tell the learner they can resume and it continues from this stage without repeating finished work.", summary: "Paused at \(job.stage.label)", chips: [ActionChip(label: "Resume preparation", action: "prepareExam", courseId: course.id, assessmentId: asm?.id)])
         }
     }
 
@@ -234,52 +225,6 @@ public enum StudyPrep {
 
     // MARK: Questions
 
-    static func generate(course: Course, asm: Assessment?, readable: [Document], state s: inout PrepState, job: inout StudyPrepJob, _ c: AgentContext, _ report: @Sendable (String) -> Void) async throws {
-        if s.taskId == nil {
-            var notes = "Exam preparation questions. Prefer a mix of difficulties and the question types that fit the subject."
-            var docIds = readable.prefix(12).map(\.id)
-            if let d = try s.mapId.flatMap({ try c.store.map($0) })?.document {
-                let sh = shares(d.topics)
-                notes += "\nTopics (study priority is a heuristic, not the real exam split):\n" + d.topics.map { "- \($0.name)\(sh[$0.name].map { " ~\(Int($0))%" } ?? "")" }.joined(separator: "\n")
-                notes += "\nCover every topic at least once and weight high-priority topics more. Do not invent instructor-specific exam details; label them generated practice."
-                let cited = Set(d.topics.flatMap(\.sources).map(\.documentId))
-                if !cited.isEmpty { docIds = Array((readable.filter { cited.contains($0.id) } + readable.filter { !cited.contains($0.id) }).prefix(12).map(\.id)) }
-            }
-            let count = min(30, max(10, s.topicCount * 2))
-            let t = try c.ai.createGenerationTask(courseId: course.id, assessmentId: asm?.id, params: GenerationParams(count: count, skillIds: s.skillIds, documentIds: docIds, notes: String(notes.prefix(6000)), mode: .matchInstructorStyle))
-            s.taskId = t.id; try save(&job, s, c)
-        }
-        for b in try c.ai.batches(taskId: s.taskId!) where !s.doneBatches.contains(b.id) {
-            try Task.checkCancellation()
-            guard s.modelCalls < maxModelCalls else { throw ToolError.unavailable("Reached this job’s model-call budget; resume to continue.") }
-            let pkg = try c.ai.prepare(batchId: b.id)
-            s.modelCalls += 1; try save(&job, s, c)
-            let out = try await c.gateway.complete(task: WorkflowTask.find("quizGeneration")!, prompt: pkg.singlePrompt, courseId: course.id)
-            report("Validating and saving questions")
-            // Import validates, rejects invalid entries individually and drops duplicates by fingerprint; only valid items are saved.
-            do { let r = try c.ai.importResponse(out.text, targetBatchId: b.id); s.accepted += r.accepted.count; s.duplicates += r.duplicates.count; s.rejected += r.rejected.count }
-            catch { s.rejected += 1; s.retries["questions", default: 0] += 1; if s.retries["questions", default: 0] > maxRetriesPerStage { throw error } ; continue }
-            s.doneBatches.append(b.id); try save(&job, s, c)
-        }
-        s.log.append("Saved \(s.accepted) question(s)")
-    }
-
-    // MARK: Result
-
-    static func summary(_ job: StudyPrepJob, _ s: PrepState, _ course: Course, _ asm: Assessment?, cached: Bool) -> ToolOutput {
-        let name = asm?.name ?? "the course"
-        var t = "\(cached ? "Already prepared (sources unchanged). " : "")Preparation for \(name) in \(course.name) is saved: \(s.topicCount) topic(s) (\(s.topicsWithSources) with verified source references), \(s.accepted) practice question(s) in the question bank"
-        t += s.duplicates > 0 ? ", \(s.duplicates) duplicate(s) skipped" : ""
-        t += s.rejected > 0 ? ", \(s.rejected) invalid item(s) rejected." : "."
-        t += " The questions are structurally validated and marked Unverified, not independently checked. Priorities are study estimates unless a topic says instructor-stated."
-        if !s.gaps.isEmpty { t += " Not fully readable: " + s.gaps.joined(separator: ", ") + "." }
-        t += " Tell the learner in a few sentences, using exactly these numbers. Do not call more tools."
-        let c = course.id
-        return ToolOutput(text: t, summary: "\(s.topicCount) topics, \(s.accepted) questions", mapId: s.mapId, chips: [
-            ActionChip(label: "View Topics", action: "openSkills", courseId: c), ActionChip(label: "View Questions", action: "openQuestionBank", courseId: c),
-            ActionChip(label: "Start Practice", action: "startPractice", courseId: c, assessmentId: asm?.id), ActionChip(label: "Review Sources", action: "openCourse", courseId: c),
-            ActionChip(label: "Regenerate Questions", action: "prepareExam", courseId: c, assessmentId: asm?.id)])
-    }
 }
 
 extension AgentRegistry {
@@ -295,12 +240,12 @@ extension AgentRegistry {
                      return ToolOutput(text: "The guided preparation for \(name) in \(course.name) is ready in the app (\(where_)). Tell the learner to continue with the “Open preparation” button; saved analysis is reused and nothing is generated until they approve it. Do not call more tools.",
                                        summary: "Opened preparation", chips: [ActionChip(label: "Open preparation", action: "prepareExam", courseId: course.id, assessmentId: job.assessmentId)])
                  }),
-        ToolSpec(name: "exam.prepare", summary: "Do the WHOLE exam preparation in one call: find/create the assessment, check sources, identify topics with evidence-based priorities, generate and save practice questions. Resumes automatically if a previous run stopped. Use this instead of searching sources yourself. Call it once.",
+        ToolSpec(name: "exam.prepare", summary: "Run the WHOLE exam preparation now without stopping for review: it uses the same workflow as the guided exam-preparation window (same saved job, analysis and practice set). Prefer exam.workflow so the learner can review the study map; use this only when they ask you to just do it. Call it once.",
                  params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "e.g. Midterm 3", required: true), ToolParam("regenerate", "boolean", "Make a new question set even if one exists")], permission: .write, approval: false,
                  describe: { a, _ in "Prepare \(a.string("assessment") ?? "the exam") in \(a.string("course") ?? "the course")" },
                  run: { a, c, info in
                      let course = try c.course(try a.require("course"))
-                     return try await StudyPrep.run(course: course, assessmentName: try a.require("assessment"), regenerate: a.bool("regenerate") ?? false, conversationId: info.conversationId, c, stage: info.stage)
+                     return try await ExamPrepCoordinator(c).runAll(course: course, assessmentName: try a.require("assessment"), regenerate: a.bool("regenerate") ?? false, conversationId: info.conversationId, stage: info.stage)
                  }),
     ]
 }
