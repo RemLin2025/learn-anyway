@@ -376,11 +376,15 @@ struct TopicsTab: View {
 
 /// A course's Materials are the Library rooted at that course: same records, same folders, same actions.
 struct MaterialsTab: View {
+    @EnvironmentObject var model: AppModel
     let course: Course
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Text("Documents, images and videos for this course. They also appear in Library.")
-                .font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1).padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.sm)
+            HStack {
+                Text("Documents, images and videos for this course. They also appear in Library.").font(.callout).foregroundStyle(Theme.textSecondary).lineLimit(1)
+                Spacer()
+                Button { model.openSummaries(courseId: course.id) } label: { Label("Summaries", systemImage: "doc.text") }.buttonStyle(.secondary).help("Summarize notes, or reopen saved summaries")
+            }.padding(.horizontal, Theme.Space.lg).padding(.top, Theme.Space.sm)
             LibraryBrowser(base: .course(course.id)).id(course.id)
         }
     }

@@ -108,6 +108,8 @@ struct LibraryBrowser: View {
             HStack(spacing: 2) {
                 layoutButton("grid", "square.grid.2x2", "Grid view"); layoutButton("list", "list.bullet", "List view")
             }.padding(3).background(Theme.elevated, in: RoundedRectangle(cornerRadius: Theme.Radius.control))
+            if hidePills { SavedViewsMenu(category: "materials", current: MaterialsViewFilter(text: searchText, filter: query.filter.rawValue, favoritesOnly: query.favoritesOnly, sort: query.sort.rawValue, ascending: query.ascending)) { v in
+                searchText = v.text; query.filter = LibraryFilter(rawValue: v.filter) ?? .all; query.favoritesOnly = v.favoritesOnly; query.sort = LibrarySort(rawValue: v.sort) ?? .name; query.ascending = v.ascending } }
             SearchField(prompt: "Search library", text: $searchText).frame(minWidth: 100, idealWidth: title == nil ? 170 : 240, maxWidth: title == nil ? 220 : 280)
             Menu {
                 Button { newFolder = true } label: { Label("New Folder", systemImage: "folder.badge.plus") }.disabled(tab == .deleted)

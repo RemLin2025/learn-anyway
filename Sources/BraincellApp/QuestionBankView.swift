@@ -16,6 +16,8 @@ struct QuestionBankView: View {
     @State private var tagging = false
     @State private var saveName = ""
     @State private var saving = false
+    @State private var favIds: Set<String> = []
+    @State private var favoritesOnly = false
     @State private var newSetIds: [UUID]?
     @State private var newSetCourse: UUID?
     @State private var newSetName = ""
@@ -80,6 +82,7 @@ struct QuestionBankView: View {
                 Picker("Sort", selection: $filter.sort) { ForEach(QuestionFilter.Sort.allCases, id: \.self) { Text($0.rawValue.capitalized).tag($0) } }
                 Toggle("Show archived", isOn: $filter.includeArchived)
             } label: { Label("More", systemImage: "slider.horizontal.3") }
+            Toggle(isOn: $favoritesOnly) { Image(systemName: favoritesOnly ? "star.fill" : "star") }.toggleStyle(.button).help("Favorites only").accessibilityLabel("Favorites only").onChange(of: favoritesOnly) { _, _ in load() }
             Menu {
                 Button("Save Current View…") { saving = true }
                 if !views.isEmpty { Divider() }
@@ -109,7 +112,7 @@ struct QuestionBankView: View {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text(r.title).font(.system(.body, design: .rounded, weight: .medium)).lineLimit(2)
-                            HStack(spacing: 4) { Badge(text: r.question.type.label); Badge(text: "D\(r.difficulty)", color: Theme.textSecondary) }
+                            HStack(spacing: 4) { Badge(text: r.question.type.label); Badge(text: "D\(r.difficulty)", color: Theme.textSecondary); if favIds.contains(r.id.uuidString) { Image(systemName: "star.fill").foregroundStyle(Theme.attention).accessibilityLabel("Favorite") } }
                         }
                         Spacer()
                         Badge(text: r.question.readiness.label, color: r.question.readiness.color)
@@ -133,6 +136,7 @@ struct QuestionBankView: View {
             model.generateRequest = GenerateRequest(courseId: r.question.courseId, skillIds: d?.skills.map(\.id) ?? [], notes: "Create variations similar to: “\(r.title)”")
         }
         Button("Change Skill Tags…") { selection = Set(ids); loadSkills(for: r.question.courseId); tagging = true }
+        Button(ids.allSatisfy { favIds.contains($0.uuidString) } ? "Remove from Favorites" : "Add to Favorites") { let on = !ids.allSatisfy { favIds.contains($0.uuidString) }; model.perform { for i in ids { try model.favorites?.set(.question, i.uuidString, on) } }; load() }
         addToSetMenu(ids, course: r.question.courseId)
         Menu("Add to Assessment") {
             let asm = (try? model.courses?.assessments(courseId: r.question.courseId)) ?? []
@@ -197,6 +201,8 @@ struct QuestionBankView: View {
         else { assessments = []; skills = []; filter.assessmentId = nil; filter.skillId = nil }
         rows = (try? qs.list(filter)) ?? []
         views = (try? qs.savedViews()) ?? []
+        favIds = (try? model.favorites?.ids(.question)) ?? []
+        if favoritesOnly { rows = rows.filter { favIds.contains($0.id.uuidString) } }
         selection = selection.filter { id in rows.contains { $0.id == id } }
         if let f = model.questionFocus, rows.contains(where: { $0.id == f }) { selection = [f]; model.questionFocus = nil }
         if SnapshotRunner.isActive, selection.isEmpty, let first = rows.first { selection = [first.id] } // screenshot aid

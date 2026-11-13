@@ -49,7 +49,7 @@ struct LibraryView: View {
         case .all: LibraryAllView().id("all")
         case .courses: LibraryBrowser(base: .root, initial: .filter(.folders), hidePills: true).id("courses")
         case .materials: LibraryBrowser(base: .root, hidePills: true).id("materials")
-        case .favorites: LibraryBrowser(base: .root, initial: .favorites, hidePills: true).id("favorites")
+        case .favorites: LibraryFavoritesView().id("favorites")
         case .recentlyDeleted: LibraryBrowser(base: .root, initial: .deleted, hidePills: true).id("deleted")
         case .questions: QuestionBankView().id("questions")
         case .practiceSets: LibraryPracticeSets().id("sets")
@@ -82,7 +82,7 @@ struct LibraryAllView: View {
     private var overview: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 200), spacing: Theme.Space.md)], spacing: Theme.Space.md) {
             ForEach(LibraryHit.Kind.allCases, id: \.self) { k in
-                Button { model.librarySection = section(k) } label: {
+                Button { if k == .summary { model.openSummaries() } else { model.librarySection = section(k) } } label: {
                     Card(padding: 16) {
                         VStack(alignment: .leading, spacing: 4) {
                             Text("\(result.counts[k] ?? 0)").font(.title.weight(.semibold).monospacedDigit())
@@ -118,49 +118,9 @@ struct LibraryAllView: View {
     }
 
     private func section(_ k: LibraryHit.Kind) -> LibrarySection {
-        switch k { case .course: .courses; case .material: .materials; case .question: .questions; case .practiceSet: .practiceSets; case .template: .templates }
+        switch k { case .course: .courses; case .material: .materials; case .question: .questions; case .practiceSet: .practiceSets; case .template: .templates; case .summary: .materials }
     }
 
     /// Sends the learner to the section that owns the hit, focused on it where that section supports it.
-    private func open(_ h: LibraryHit, all: Bool) {
-        switch h.kind {
-        case .course: if let c = h.courseId { model.selectedCourseID = c; model.selection = .courses }
-        case .material: model.librarySearchSeed = text; model.librarySection = .materials
-        case .question: model.questionFocus = all ? nil : UUID(uuidString: h.key); model.questionSearchSeed = all ? text : nil; model.librarySection = .questions
-        case .practiceSet: model.openPracticeSetID = all ? nil : UUID(uuidString: h.key); model.librarySection = .practiceSets
-        case .template: model.librarySection = .templates
-        }
-    }
-}
-
-/// Every practice set, across courses. The course Practice tab shows the same sets for one course.
-struct LibraryPracticeSets: View {
-    @EnvironmentObject var model: AppModel
-    @State private var sets: [PracticeSet] = []
-    @State private var text = ""
-    @State private var open: PracticeSet?
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: Theme.Space.md) {
-            HStack { Text("Practice Sets").font(Theme.pageTitle); Spacer(); SearchField(prompt: "Search practice sets", text: $text).frame(maxWidth: 260) }
-            let shown = sets.filter { text.trimmed.isEmpty || LibrarySearchService.matches(text, in: $0.title + " " + courseName($0)) }
-            if shown.isEmpty {
-                EmptyStateView(symbol: "list.bullet.rectangle", title: sets.isEmpty ? "No practice sets yet" : "No practice sets match", message: sets.isEmpty ? "Create one from a course’s Practice tab. Saved questions are reused and only what’s missing is generated." : "Clear the search to see them all.")
-            } else {
-                ScrollView { VStack(spacing: 6) { ForEach(shown) { s in
-                    Button { open = s } label: {
-                        HStack { VStack(alignment: .leading, spacing: 2) { Text(s.title).font(Theme.cardTitle); Text("\(courseName(s)) · \(s.createdAt.formatted(date: .abbreviated, time: .omitted))").font(.caption).foregroundStyle(Theme.textSecondary) }
-                            Spacer(); Image(systemName: "chevron.right").foregroundStyle(Theme.textSecondary) }
-                            .padding(10).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.control)).overlay(RoundedRectangle(cornerRadius: Theme.Radius.control).strokeBorder(Theme.border)).contentShape(Rectangle())
-                    }.buttonStyle(.plain)
-                } } }
-            }
-        }
-        .padding(Theme.Space.lg)
-        .task(id: model.revision) { sets = (try? model.practiceSets?.allSets()) ?? []; focus() }
-        .onChange(of: model.openPracticeSetID) { _, _ in focus() }
-        .sheet(item: $open) { s in PracticeSetDetailSheet(course: model.courseList.first { $0.id == s.courseId }, set: s) }
-    }
-    private func courseName(_ s: PracticeSet) -> String { model.courseList.first { $0.id == s.courseId }?.name ?? "Course" }
-    private func focus() { if let id = model.openPracticeSetID, let s = sets.first(where: { $0.id == id }) { open = s; model.openPracticeSetID = nil } }
+    private func open(_ h: LibraryHit, all: Bool) { model.openLibraryHit(h, query: text, all: all) }
 }

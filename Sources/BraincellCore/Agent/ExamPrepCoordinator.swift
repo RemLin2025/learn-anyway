@@ -7,6 +7,8 @@ import GRDB
 public final class ExamPrepCoordinator: @unchecked Sendable {
     let c: AgentContext
     public init(_ ctx: AgentContext) { c = ctx }
+    /// The chip the launcher tool returns. The app opens the workflow automatically for it; other "prepareExam" chips (e.g. Regenerate) only open it on click.
+    public static let openChipLabel = "Open preparation"
 
     public struct Materials: Sendable {
         public var readable: [Document]

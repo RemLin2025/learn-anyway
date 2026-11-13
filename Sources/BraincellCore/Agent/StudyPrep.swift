@@ -237,8 +237,8 @@ extension AgentRegistry {
                      let job = try ExamPrepCoordinator(c).start(course: course, assessmentName: try a.require("assessment"), conversationId: info.conversationId)
                      let s = job.state, name = try a.require("assessment")
                      let where_ = s.setId != nil ? "a practice set is already planned" : s.mapId != nil ? "a study map is saved with \(s.topicCount) topic(s)" : "nothing is analyzed yet"
-                     return ToolOutput(text: "The guided preparation for \(name) in \(course.name) is ready in the app (\(where_)). Tell the learner to continue with the “Open preparation” button; saved analysis is reused and nothing is generated until they approve it. Do not call more tools.",
-                                       summary: "Opened preparation", chips: [ActionChip(label: "Open preparation", action: "prepareExam", courseId: course.id, assessmentId: job.assessmentId)])
+                     return ToolOutput(text: "The guided preparation for \(name) in \(course.name) is ready in the app (\(where_)). Tell the learner the guided workflow has opened for them (the “Open preparation” button reopens it); saved analysis is reused and nothing is generated until they approve it. Do not call more tools.",
+                                       summary: "Opened preparation", chips: [ActionChip(label: ExamPrepCoordinator.openChipLabel, action: "prepareExam", courseId: course.id, assessmentId: job.assessmentId)])
                  }),
         ToolSpec(name: "exam.prepare", summary: "Run the WHOLE exam preparation now without stopping for review: it uses the same workflow as the guided exam-preparation window (same saved job, analysis and practice set). Prefer exam.workflow so the learner can review the study map; use this only when they ask you to just do it. Call it once.",
                  params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "e.g. Midterm 3", required: true), ToolParam("regenerate", "boolean", "Make a new question set even if one exists")], permission: .write, approval: false,

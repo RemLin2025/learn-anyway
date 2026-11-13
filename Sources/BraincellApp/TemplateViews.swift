@@ -11,6 +11,8 @@ struct TemplateGalleryView: View {
     @State private var showAI = false
     @State private var detail: (PracticeSet, String)?
     @State private var showNew = false
+    @State private var f = TemplatesViewFilter()
+    @State private var favs: Set<String> = []
 
     private let examples = TemplateExamples.questions.map { (UUID(), $0, Optional("Probability")) }
 
@@ -20,10 +22,15 @@ struct TemplateGalleryView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) { Text("Learning Templates").font(Theme.sectionTitle); Text("How a saved practice set is presented. Switching template never regenerates questions.").font(.callout).foregroundStyle(Theme.textSecondary) }
                     Spacer()
+                    SearchField(prompt: "Search templates", text: $f.text).frame(maxWidth: 200)
+                    FilterMenu(title: "Origin", selection: Binding(get: { f.origin == "All" ? nil : f.origin }, set: { f.origin = $0 ?? "All" }), options: ["Built-in", "Custom"].map { ($0, $0) })
+                    Toggle(isOn: $f.favoritesOnly) { Image(systemName: f.favoritesOnly ? "star.fill" : "star") }.toggleStyle(.button).help("Favorites only").accessibilityLabel("Favorites only")
+                    SavedViewsMenu(category: "templates", current: f) { f = $0 }
                     Button { showAI = true } label: { Label("Create with AI", systemImage: "sparkles") }.buttonStyle(.secondary)
                 }
+                if shown.isEmpty { EmptyStateView(symbol: "rectangle.3.group", title: "No templates match", message: "Adjust or clear the filters.", actionTitle: "Clear Filters") { f = TemplatesViewFilter() } }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Theme.Space.lg, alignment: .top)], alignment: .leading, spacing: Theme.Space.lg) {
-                    ForEach(templates) { t in card(t) }
+                    ForEach(shown) { t in card(t) }
                 }
             }.padding(Theme.Space.xl)
         }
@@ -39,13 +46,22 @@ struct TemplateGalleryView: View {
         let all: [PracticeSet]? = course.map { try? model.practiceSets?.sets(courseId: $0.id) ?? [] } ?? (try? model.practiceSets?.allSets())
         return Array((all ?? []).prefix(10))
     }
-    private func reload() { templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns }
+    private var shown: [LearningTemplate] {
+        templates.filter { t in
+            (f.text.trimmed.isEmpty || LibrarySearchService.matches(f.text, in: t.name + " " + t.description))
+            && (f.origin == "All" || (f.origin == "Built-in") == t.isBuiltIn)
+            && (!f.favoritesOnly || favs.contains(t.id))
+        }
+    }
+    private func toggleFav(_ t: LearningTemplate) { let on = !favs.contains(t.id); model.perform { try model.favorites?.set(.template, t.id, on) }; favs = (try? model.favorites?.ids(.template)) ?? [] }
+    private func reload() { favs = (try? model.favorites?.ids(.template)) ?? []; templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns }
 
     @ViewBuilder private func card(_ t: LearningTemplate) -> some View {
         let doc = RenderBuilder.build(template: t, title: t.kind == .flashcards ? "Flashcards" : "Sample", questions: examples)
         Card(padding: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack { Text(t.name).font(Theme.cardTitle); Badge(text: t.kind.title); if t.isBuiltIn { Badge(text: "Built-in", color: Theme.mastery) } else if t.baseId != nil { Badge(text: "Customized") } }
+                HStack { Text(t.name).font(Theme.cardTitle); Badge(text: t.kind.title); if t.isBuiltIn { Badge(text: "Built-in", color: Theme.mastery) } else if t.baseId != nil { Badge(text: "Customized") }
+                    Spacer(); Button { toggleFav(t) } label: { Image(systemName: favs.contains(t.id) ? "star.fill" : "star").foregroundStyle(favs.contains(t.id) ? Theme.attention : Theme.textSecondary).frame(width: 30, height: 28).contentShape(Rectangle()) }.buttonStyle(.plain).help(favs.contains(t.id) ? "Remove from Favorites" : "Add to Favorites").accessibilityLabel(favs.contains(t.id) ? "Remove \(t.name) from Favorites" : "Add \(t.name) to Favorites") }
                 Text(t.description).font(.callout).foregroundStyle(Theme.textSecondary)
                 RenderDocumentView(doc: doc, limit: t.kind == .flashcards ? 1 : 2).frame(height: 230, alignment: .top).clipped().overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                     .accessibilityLabel("Preview of \(t.name)")

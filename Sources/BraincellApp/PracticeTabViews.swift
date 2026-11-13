@@ -10,6 +10,68 @@ struct PracticeSetCard: Identifiable {
     var assessmentName: String?
     var progress: SetProgress
     var id: UUID { practiceSet.id }
+
+    @MainActor static func make(_ s: PracticeSet, model: AppModel, assessments: [Assessment]) -> PracticeSetCard {
+        let it = (try? model.practiceSets?.items(setId: s.id)) ?? []
+        let tpl = s.templateId.flatMap { try? model.templates?.template($0) }?.name ?? LearningTemplate.interactive.name
+        return PracticeSetCard(practiceSet: s, questionCount: it.filter { $0.questionId != nil }.count, unfilled: it.filter { $0.questionId == nil }.count, templateName: tpl,
+                               assessmentName: s.assessmentId.flatMap { id in assessments.first { $0.id == id }?.name }, progress: (try? model.practiceSets?.progress(setId: s.id)) ?? .none)
+    }
+}
+
+/// One practice set as a scannable row. The same view is used on the course Practice tab and in Library → Practice Sets.
+struct PracticeSetCardView: View {
+    let card: PracticeSetCard
+    var favorite = false
+    var onStart: (Bool) -> Void
+    var onEdit: () -> Void
+    var onOpen: () -> Void
+    var onDuplicate: () -> Void
+    var onDelete: () -> Void
+    var onFavorite: () -> Void
+
+    var body: some View {
+        let c = card, p = card.progress
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(spacing: 6) { Text(c.practiceSet.title).font(Theme.cardTitle).lineLimit(1); stateBadge(p); if favorite { Image(systemName: "star.fill").foregroundStyle(Theme.attention).accessibilityLabel("Favorite") } }
+                Text(meta(c)).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
+                if p.state != .notStarted, p.total > 0 {
+                    HStack(spacing: 8) { MeterBar(value: Double(p.answered) / Double(p.total), tint: Theme.mastery).frame(width: 140); Text("\(p.answered) of \(p.total) answered").font(.caption).foregroundStyle(Theme.textSecondary) }
+                        .accessibilityElement(children: .combine)
+                }
+            }
+            Spacer()
+            Button { onStart(false) } label: { Label(p.state == .inProgress ? "Resume" : (p.state == .completed ? "Practice again" : "Start"), systemImage: p.state == .inProgress ? "play.circle" : "play.fill") }
+                .buttonStyle(.primary).disabled(c.questionCount == 0)
+            Button("Edit", action: onEdit).buttonStyle(.secondary)
+            Menu {
+                Button("Open", action: onOpen)
+                if p.state == .inProgress { Button("Start a New Attempt") { onStart(true) } }
+                Button(favorite ? "Remove from Favorites" : "Add to Favorites", action: onFavorite)
+                Button("Duplicate", action: onDuplicate)
+                Divider()
+                Button("Delete…", role: .destructive, action: onDelete)
+            } label: { Image(systemName: "ellipsis.circle").frame(width: 30, height: 28).contentShape(Rectangle()) }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("More actions for \(c.practiceSet.title)")
+        }
+        .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card)).overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.border))
+    }
+
+    @ViewBuilder private func stateBadge(_ p: SetProgress) -> some View {
+        switch p.state {
+        case .notStarted: EmptyView()
+        case .inProgress: Badge(text: p.stale ? "In progress · set edited" : "In progress", color: Theme.attention)
+        case .completed: Badge(text: "Completed", color: Theme.mastery)
+        }
+    }
+
+    private func meta(_ c: PracticeSetCard) -> String {
+        var parts = ["\(c.questionCount) question\(c.questionCount == 1 ? "" : "s")", c.templateName]
+        if let a = c.assessmentName { parts.append(a) }
+        if c.unfilled > 0 { parts.append("\(c.unfilled) still to generate") }
+        parts.append("Last activity " + (c.progress.lastActivity ?? c.practiceSet.updatedAt ?? c.practiceSet.createdAt).formatted(date: .abbreviated, time: .omitted))
+        return parts.joined(separator: " · ")
+    }
 }
 
 /// Course → Practice: every saved set for this course, with Start/Resume, editing and the usual actions.
@@ -25,6 +87,7 @@ struct CoursePracticeTab: View {
     @State private var detail: PracticeSet?
     @State private var confirmDelete: PracticeSet?
     @State private var showDeleted = false
+    @State private var favs: Set<String> = []
 
     private var shown: [PracticeSetCard] {
         cards.filter { c in
@@ -72,45 +135,12 @@ struct CoursePracticeTab: View {
     }
 
     private func card(_ c: PracticeSetCard) -> some View {
-        let p = c.progress
-        return HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) { Text(c.practiceSet.title).font(Theme.cardTitle).lineLimit(1); stateBadge(p) }
-                Text(meta(c)).font(.caption).foregroundStyle(Theme.textSecondary).lineLimit(2)
-                if p.state != .notStarted, p.total > 0 {
-                    HStack(spacing: 8) { MeterBar(value: Double(p.answered) / Double(p.total), tint: Theme.mastery).frame(width: 140); Text("\(p.answered) of \(p.total) answered").font(.caption).foregroundStyle(Theme.textSecondary) }
-                        .accessibilityElement(children: .combine)
-                }
-            }
-            Spacer()
-            Button { start(c, newAttempt: false) } label: { Label(p.state == .inProgress ? "Resume" : (p.state == .completed ? "Practice again" : "Start"), systemImage: p.state == .inProgress ? "play.circle" : "play.fill") }
-                .buttonStyle(.primary).disabled(c.questionCount == 0)
-            Button("Edit") { editing = c.practiceSet }.buttonStyle(.secondary)
-            Menu {
-                Button("Open") { detail = c.practiceSet }
-                if p.state == .inProgress { Button("Start a New Attempt") { start(c, newAttempt: true) } }
-                Button("Duplicate") { model.perform { try model.practiceSets?.duplicate(setId: c.practiceSet.id) }; load() }
-                Divider()
-                Button("Delete…", role: .destructive) { confirmDelete = c.practiceSet }
-            } label: { Image(systemName: "ellipsis.circle").frame(width: 30, height: 28).contentShape(Rectangle()) }.menuStyle(.borderlessButton).fixedSize().accessibilityLabel("More actions")
-        }
-        .padding(12).background(Theme.surface, in: RoundedRectangle(cornerRadius: Theme.Radius.card)).overlay(RoundedRectangle(cornerRadius: Theme.Radius.card).strokeBorder(Theme.border))
+        PracticeSetCardView(card: c, favorite: favs.contains(c.id.uuidString), onStart: { start(c, newAttempt: $0) }, onEdit: { editing = c.practiceSet }, onOpen: { detail = c.practiceSet },
+                            onDuplicate: { model.perform { try model.practiceSets?.duplicate(setId: c.practiceSet.id) }; load() }, onDelete: { confirmDelete = c.practiceSet }, onFavorite: { toggleFav(c) })
     }
-
-    @ViewBuilder private func stateBadge(_ p: SetProgress) -> some View {
-        switch p.state {
-        case .notStarted: EmptyView()
-        case .inProgress: Badge(text: p.stale ? "In progress · set edited" : "In progress", color: Theme.attention)
-        case .completed: Badge(text: "Completed", color: Theme.mastery)
-        }
-    }
-
-    private func meta(_ c: PracticeSetCard) -> String {
-        var parts = ["\(c.questionCount) question\(c.questionCount == 1 ? "" : "s")", c.templateName]
-        if let a = c.assessmentName { parts.append(a) }
-        if c.unfilled > 0 { parts.append("\(c.unfilled) still to generate") }
-        parts.append("Last activity " + (c.progress.lastActivity ?? c.practiceSet.updatedAt ?? c.practiceSet.createdAt).formatted(date: .abbreviated, time: .omitted))
-        return parts.joined(separator: " · ")
+    private func toggleFav(_ c: PracticeSetCard) {
+        let on = !favs.contains(c.id.uuidString)
+        model.perform { try model.favorites?.set(.practiceSet, c.id.uuidString, on) }; load()
     }
 
     private func start(_ c: PracticeSetCard, newAttempt: Bool) {
@@ -125,13 +155,9 @@ struct CoursePracticeTab: View {
     private func load() {
         guard let svc = model.practiceSets else { return }
         let asm = (try? model.courses?.assessments(courseId: course.id)) ?? []
-        cards = ((try? svc.sets(courseId: course.id)) ?? []).map { s in
-            let it = (try? svc.items(setId: s.id)) ?? []
-            let tpl = s.templateId.flatMap { try? model.templates?.template($0) }?.name ?? LearningTemplate.interactive.name
-            return PracticeSetCard(practiceSet: s, questionCount: it.filter { $0.questionId != nil }.count, unfilled: it.filter { $0.questionId == nil }.count, templateName: tpl,
-                                   assessmentName: s.assessmentId.flatMap { id in asm.first { $0.id == id }?.name }, progress: (try? svc.progress(setId: s.id)) ?? .none)
-        }
+        cards = ((try? svc.sets(courseId: course.id)) ?? []).map { PracticeSetCard.make($0, model: model, assessments: asm) }
         deleted = (try? svc.deletedSets(courseId: course.id)) ?? []
+        favs = (try? model.favorites?.ids(.practiceSet)) ?? []
         focus()
     }
 }

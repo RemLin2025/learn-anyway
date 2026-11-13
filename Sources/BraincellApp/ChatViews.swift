@@ -97,7 +97,7 @@ struct SuggestionGrid: View {
         S(id: "explain", symbol: "book", title: "Explain a concept", hint: "Starts a chat about a concept in your course"),
         S(id: "weak", symbol: "chart.line.uptrend.xyaxis", title: "Review my weaknesses", hint: "Practice the skills you’ve been missing, from your saved results"),
         S(id: "cram", symbol: "bolt", title: "Quick cram", hint: "A timed practice set from your saved questions"),
-        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", hint: "Starts a chat about summarizing your notes"),
+        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", hint: "Choose materials; saved summaries are reused, only new ones are generated"),
     ]
     private func run(_ s: S) {
         let course = chat.app.courseList.first { $0.id == chat.app.selectedCourseID }?.name
@@ -107,7 +107,7 @@ struct SuggestionGrid: View {
         case "weak": chat.app.reviewWeaknesses()
         case "cram": chat.app.quickCram()
         case "explain": chat.draft = "Explain a difficult concept from \(course ?? "my course") step by step: "
-        default: chat.draft = "Summarize my notes\(course.map { " for \($0)" } ?? "") into the key points I should remember."
+        default: chat.app.openSummaries()
         }
     }
     var body: some View {

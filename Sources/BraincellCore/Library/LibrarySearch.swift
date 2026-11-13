@@ -4,9 +4,9 @@ import GRDB
 /// One result of the Universal Library search. A view over existing data (courses, files, questions, practice sets, templates); nothing is copied or indexed separately.
 public struct LibraryHit: Identifiable, Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case course, material, question, practiceSet, template
+        case course, material, question, practiceSet, template, summary
         public var title: String {
-            switch self { case .course: "Courses"; case .material: "Materials"; case .question: "Questions"; case .practiceSet: "Practice Sets"; case .template: "Templates" }
+            switch self { case .course: "Courses"; case .material: "Materials"; case .question: "Questions"; case .practiceSet: "Practice Sets"; case .template: "Templates"; case .summary: "Summaries" }
         }
     }
     public var kind: Kind
@@ -55,6 +55,7 @@ public final class LibrarySearchService: @unchecked Sendable {
             counts[.question] = try db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM questions WHERE archivedAt IS NULL") } ?? 0
             counts[.practiceSet] = try db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM practice_sets") } ?? 0
             counts[.template] = try templates.all().count
+            counts[.summary] = try db.read { try Int.fetchOne($0, sql: "SELECT COUNT(*) FROM note_summaries") } ?? 0
             return LibrarySearchResult(hits: [], counts: counts)
         }
         var f = QuestionFilter(); f.text = text
@@ -68,9 +69,34 @@ public final class LibrarySearchService: @unchecked Sendable {
         for t in try templates.all() where Self.matches(text, in: t.name + " " + t.description) {
             all.append(LibraryHit(kind: .template, key: t.id, title: t.name, subtitle: t.isBuiltIn ? "Built-in template" : "Custom template", courseId: nil))
         }
+        for n in try db.read({ try Row.fetchAll($0, sql: "SELECT id, courseId, documentName FROM note_summaries ORDER BY createdAt DESC") }) {
+            let cid: UUID? = n["courseId"], name: String = n["documentName"]
+            if Self.matches(text, in: name + " summary " + (cid.flatMap { courseName[$0] } ?? "")) { all.append(LibraryHit(kind: .summary, key: (n["id"] as UUID).uuidString, title: name, subtitle: "Summary · " + (cid.flatMap { courseName[$0] } ?? "Notes"), courseId: cid)) }
+        }
         let counts = Dictionary(grouping: all, by: \.kind).mapValues(\.count)
         var out: [LibraryHit] = []
         for k in LibraryHit.Kind.allCases { out += all.filter { $0.kind == k }.prefix(perKind) }
         return LibrarySearchResult(hits: out, counts: counts)
+    }
+
+    /// Everything the learner starred, across files, questions, practice sets and templates. No separate index: each item is read from its own store.
+    public func favorites() throws -> [LibraryHit] {
+        let fav = LibraryFavorites(db: db)
+        let courses = try db.read { try Row.fetchAll($0, sql: "SELECT id, name FROM courses WHERE archivedAt IS NULL") }
+        let courseName = Dictionary(uniqueKeysWithValues: courses.map { ($0["id"] as UUID, $0["name"] as String) })
+        var out: [LibraryHit] = []
+        var q = LibraryQuery(); q.favoritesOnly = true
+        for e in try library.list(.root, q) where e.kind != .courseFolder {
+            out.append(LibraryHit(kind: .material, key: e.id.uuidString, title: e.name, subtitle: [e.kind.label, e.courseId.flatMap { courseName[$0] }].compactMap { $0 }.joined(separator: " · "), courseId: e.courseId))
+        }
+        let qids = try fav.ids(.question)
+        if !qids.isEmpty { for r in try questions.list(QuestionFilter()) where qids.contains(r.id.uuidString) {
+            out.append(LibraryHit(kind: .question, key: r.id.uuidString, title: r.title, subtitle: [r.question.type.label, courseName[r.question.courseId]].compactMap { $0 }.joined(separator: " · "), courseId: r.question.courseId)) } }
+        let sids = try fav.ids(.practiceSet)
+        if !sids.isEmpty { for s in try db.read({ try Row.fetchAll($0, sql: "SELECT id, courseId, title FROM practice_sets WHERE deletedAt IS NULL") }) where sids.contains((s["id"] as UUID).uuidString) {
+            out.append(LibraryHit(kind: .practiceSet, key: (s["id"] as UUID).uuidString, title: s["title"], subtitle: courseName[s["courseId"] as UUID] ?? "Practice set", courseId: s["courseId"])) } }
+        let tids = try fav.ids(.template)
+        for t in try templates.all() where tids.contains(t.id) { out.append(LibraryHit(kind: .template, key: t.id, title: t.name, subtitle: t.isBuiltIn ? "Built-in template" : "Custom template", courseId: nil)) }
+        return out
     }
 }

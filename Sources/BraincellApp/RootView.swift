@@ -15,6 +15,7 @@ struct RootView: View {
                 model.newSetCourse = nil; model.selectedCourseID = c.id; model.selection = .courses; model.courseTabRequest = "practice"; model.openPracticeSetID = id
             }
         }
+        .sheet(item: $model.summaryRequest) { NotesSummarySheet(request: $0) }
         .sheet(item: $model.prepRequest) { ExamPrepWizard(request: $0, app: model) }
         .buttonStyle(.secondary)
         .textFieldStyle(AppFieldStyle())
