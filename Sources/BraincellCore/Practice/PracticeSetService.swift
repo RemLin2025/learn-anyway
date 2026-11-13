@@ -121,6 +121,7 @@ public final class PracticeSetService: @unchecked Sendable {
     }
     static func set(_ r: Row) -> PracticeSet { PracticeSet(id: r["id"], courseId: r["courseId"], assessmentId: r["assessmentId"], title: r["title"], fresh: r["fresh"], taskId: r["taskId"], createdAt: r["createdAt"]) }
     public func practiceSet(_ id: UUID) throws -> PracticeSet? { try db.read { try Row.fetchOne($0, sql: "SELECT * FROM practice_sets WHERE id = ?", arguments: [id]).map(Self.set) } }
+    public func allSets() throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets ORDER BY createdAt DESC").map(Self.set) } }
     public func sets(courseId: UUID) throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE courseId = ? ORDER BY createdAt DESC", arguments: [courseId]).map(Self.set) } }
 
     public func items(setId: UUID) throws -> [PracticeSetItem] {

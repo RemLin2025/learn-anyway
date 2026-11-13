@@ -2,14 +2,13 @@ import SwiftUI
 import BraincellCore
 
 enum SidebarItem: String, CaseIterable, Identifiable {
-    case home = "Home", courses = "Courses", library = "Library", questionBank = "Question Bank", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
+    case home = "Home", courses = "Courses", library = "Library", skills = "Skills", insights = "Insights", aiTasks = "AI Tasks"
     var id: String { rawValue }
     var symbol: String {
         switch self {
         case .home: "house"
         case .courses: "graduationcap"
         case .library: "books.vertical"
-        case .questionBank: "rectangle.stack"
         case .skills: "point.3.connected.trianglepath.dotted"
         case .insights: "chart.line.uptrend.xyaxis"
         case .aiTasks: "tray.and.arrow.up"
@@ -55,6 +54,7 @@ final class AppModel: ObservableObject {
     /// Set by chat chips / lists: the course screen opens this practice set.
     @Published var openPracticeSetID: UUID?
     @Published var courseTabRequest: String?
+    lazy var librarySearch: LibrarySearchService? = { guard let db, let library, let questions, let templates else { return nil }; return LibrarySearchService(db: db, library: library, questions: questions, templates: templates) }()
     lazy var tutorService: QuestionTutorService? = db.map { QuestionTutorService(db: $0, gateway: gateway) }
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
@@ -95,6 +95,10 @@ final class AppModel: ObservableObject {
     @Published var practiceSetup: PracticeSetupRequest?
     /// Set by chat's View Questions: the Question Bank opens filtered to this course, then clears it.
     @Published var questionBankCourse: UUID?
+    @Published var librarySection: LibrarySection = .materials
+    @Published var librarySearchSeed: String?
+    @Published var questionFocus: UUID?
+    @Published var questionSearchSeed: String?
     var agentStore: AgentStore? { db.map { AgentStore(db: $0) } }
 
     init(databaseURL: URL? = nil, storage: ManagedStorage = AppModel.defaultStorage()) {
@@ -278,6 +282,9 @@ final class AppModel: ObservableObject {
             if !r.skipped.isEmpty { alertMessage = "\(r.skipped.count) question(s) aren’t part of \(template.name) and were left out of this session." }
         }
     }
+
+    /// Old Question Bank entry points land in the Library's Questions section (optionally filtered to one course).
+    func openQuestionBank(course: UUID? = nil) { questionBankCourse = course; librarySection = .questions; selection = .library }
 
     func practiceCourse(_ course: Course, assessment: Assessment? = nil) {
         perform {

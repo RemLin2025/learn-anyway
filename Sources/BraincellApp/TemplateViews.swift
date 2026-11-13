@@ -4,7 +4,8 @@ import BraincellCore
 /// The Learning Template Library. Every preview is the real renderer applied to sample questions; nothing here is a placeholder.
 struct TemplateGalleryView: View {
     @EnvironmentObject var model: AppModel
-    let course: Course
+    /// nil = the global Library view: templates are shared by every course.
+    var course: Course? = nil
     @State private var templates: [LearningTemplate] = []
     @State private var editing: LearningTemplate?
     @State private var showAI = false
@@ -29,11 +30,16 @@ struct TemplateGalleryView: View {
         .task(id: model.revision) { reload() }
         .sheet(item: $editing) { t in TemplateEditorSheet(course: course, template: t) { reload() } }
         .sheet(isPresented: $showAI) { AITemplateSheet(course: course) { editing = $0 } }
-        .sheet(isPresented: $showNew) { NewPracticeSetSheet(course: course, assessment: nil) { id in showNew = false; detail = (try? model.practiceSets?.practiceSet(id)).map { ($0, "") } } }
-        .sheet(item: Binding(get: { detail.map { IdentifiedSet(practiceSet: $0.0, templateId: $0.1) } }, set: { if $0 == nil { detail = nil } })) { PracticeSetDetailSheet(course: course, set: $0.practiceSet, initialTemplateId: $0.templateId.isEmpty ? nil : $0.templateId) }
+        .sheet(isPresented: $showNew) { if let course { NewPracticeSetSheet(course: course, assessment: nil) { id in showNew = false; detail = (try? model.practiceSets?.practiceSet(id)).map { ($0, "") } } } }
+        .sheet(item: Binding(get: { detail.map { IdentifiedSet(practiceSet: $0.0, templateId: $0.1) } }, set: { if $0 == nil { detail = nil } })) { PracticeSetDetailSheet(course: course ?? courseFor($0.practiceSet), set: $0.practiceSet, initialTemplateId: $0.templateId.isEmpty ? nil : $0.templateId) }
     }
 
-    private func reload() { templates = (try? model.templates?.all(courseId: course.id)) ?? LearningTemplate.builtIns }
+    private func courseFor(_ s: PracticeSet) -> Course? { model.courseList.first { $0.id == s.courseId } }
+    private func recentSets() -> [PracticeSet] {
+        let all: [PracticeSet]? = course.map { try? model.practiceSets?.sets(courseId: $0.id) ?? [] } ?? (try? model.practiceSets?.allSets())
+        return Array((all ?? []).prefix(10))
+    }
+    private func reload() { templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns }
 
     @ViewBuilder private func card(_ t: LearningTemplate) -> some View {
         let doc = RenderBuilder.build(template: t, title: t.kind == .flashcards ? "Flashcards" : "Sample", questions: examples)
@@ -47,10 +53,10 @@ struct TemplateGalleryView: View {
                 Text(customization(t)).font(.caption).foregroundStyle(Theme.textSecondary)
                 HStack {
                     Menu {
-                        let sets = ((try? model.practiceSets?.sets(courseId: course.id)) ?? []).prefix(10)
-                        ForEach(Array(sets)) { s in Button(s.title + " · " + s.createdAt.formatted(date: .abbreviated, time: .omitted)) { detail = (s, t.id) } }
-                        if !sets.isEmpty { Divider() }
-                        Button("New practice set…") { showNew = true }
+                        let sets = recentSets()
+                        ForEach(sets) { s in Button(s.title + " · " + s.createdAt.formatted(date: .abbreviated, time: .omitted)) { detail = (s, t.id) } }
+                        if !sets.isEmpty, course != nil { Divider() }
+                        if course != nil { Button("New practice set…") { showNew = true } }
                     } label: { Label(t.kind == .examWorksheet ? "Create worksheet" : "Start practice", systemImage: "play.fill") }.menuStyle(.button).fixedSize()
                     Button("Duplicate & customize") { if let d = try? model.templates?.duplicate(t.id) { editing = d } }.buttonStyle(.secondary)
                     if !t.isBuiltIn { Button("Edit") { editing = t }.buttonStyle(.secondary); Button("Delete", role: .destructive) { model.perform { try model.templates?.delete(t.id) }; reload() } }
@@ -79,7 +85,7 @@ struct IdentifiedSet: Identifiable, Equatable {
 struct TemplateEditorSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    let course: Course?
     @State var template: LearningTemplate
     let saved: () -> Void
     @State private var global = true
@@ -114,12 +120,12 @@ struct TemplateEditorSheet: View {
                     FlowLayout(spacing: 6) { ForEach(QuestionType.allCases, id: \.self) { q in
                         Toggle(q.rawValue.replacingOccurrences(of: "_", with: " "), isOn: Binding(get: { template.supportedFormats.contains(q.rawValue) }, set: { on in template.supportedFormats.removeAll { $0 == q.rawValue }; if on { template.supportedFormats.append(q.rawValue) } })).toggleStyle(.button)
                     } }
-                    Toggle("Available in every course", isOn: $global)
+                    if course != nil { Toggle("Available in every course", isOn: $global) }
                 }
             }.frame(maxHeight: 420)
             ForEach(issues, id: \.self) { Text($0).font(.caption).foregroundStyle(Theme.error) }
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { model.perform { try model.templates?.save(template, courseId: global ? nil : course.id) }; saved(); dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(!issues.isEmpty) }
+                Button("Save") { model.perform { try model.templates?.save(template, courseId: global ? nil : course?.id) }; saved(); dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(!issues.isEmpty) }
         }.dialogSurface(width: 560)
     }
 }
@@ -128,7 +134,7 @@ struct TemplateEditorSheet: View {
 struct AITemplateSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    var course: Course? = nil
     let use: (LearningTemplate) -> Void
     @State private var text = ""
     @State private var busy = false

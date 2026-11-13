@@ -36,6 +36,7 @@ struct QuestionBankView: View {
         .task(id: model.revision) { load() }
         .onAppear { applyCourseFocus() }
         .onChange(of: model.questionBankCourse) { _, _ in applyCourseFocus() }
+        .onChange(of: model.questionFocus) { _, _ in applyCourseFocus() }
         .onChange(of: filter.courseId) { _, _ in filter.assessmentId = nil; filter.skillId = nil }   // hidden filters must not keep applying
         .onChange(of: filter) { _, _ in load() }
         .onChange(of: selection) { _, _ in loadDetail() }
@@ -157,9 +158,9 @@ struct QuestionBankView: View {
     }
 
     private func applyCourseFocus() {
-        guard let c = model.questionBankCourse else { return }
-        var f = QuestionFilter(); f.courseId = c; filter = f
-        model.questionBankCourse = nil
+        if let c = model.questionBankCourse { var f = QuestionFilter(); f.courseId = c; filter = f; model.questionBankCourse = nil }
+        if let t = model.questionSearchSeed { var f = QuestionFilter(); f.text = t; filter = f; model.questionSearchSeed = nil }
+        if model.questionFocus != nil { filter = QuestionFilter() }          // a specific question was asked for: show it regardless of earlier filters
     }
 
     private func load() {
@@ -170,6 +171,7 @@ struct QuestionBankView: View {
         rows = (try? qs.list(filter)) ?? []
         views = (try? qs.savedViews()) ?? []
         selection = selection.filter { id in rows.contains { $0.id == id } }
+        if let f = model.questionFocus, rows.contains(where: { $0.id == f }) { selection = [f]; model.questionFocus = nil }
         if SnapshotRunner.isActive, selection.isEmpty, let first = rows.first { selection = [first.id] } // screenshot aid
         loadDetail()
     }

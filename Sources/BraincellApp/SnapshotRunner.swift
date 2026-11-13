@@ -26,6 +26,7 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_UNI_SNAP"] != nil { await universalScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_REVIEW_SNAP"] != nil { await reviewScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -45,7 +46,7 @@ enum SnapshotRunner {
         await shot("01-home-empty")
         model.loadDemo()
         await shot("02-course-assessments")
-        model.selection = .questionBank
+        model.openQuestionBank()
         await shot("03-question-bank")
         model.selection = .aiTasks
         await shot("04-ai-tasks")
@@ -291,6 +292,21 @@ enum SnapshotRunner {
             v.cacheDisplay(in: v.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("s\(i)-\(s.rawValue.prefix(5)).png"))
         }
+    }
+
+    /// Universal Library and course Practice tab screenshots on the demo workspace. Only with BRAINCELL_UNI_SNAP and a throwaway BRAINCELL_DATA_DIR.
+    static func universalScenario(_ model: AppModel, dir: URL) async {
+        guard ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        model.loadDemo()
+        func shot(_ name: String) async {
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        model.selection = .library
+        for s in [LibrarySection.all, .materials, .questions, .practiceSets, .templates] { model.librarySection = s; await shot("u-\(s.rawValue.replacingOccurrences(of: " ", with: ""))") }
+        if let c = model.courseList.first { model.selectedCourseID = c.id; model.selection = .courses; model.courseTabRequest = "practice"; await shot("u-coursePractice") }
     }
 
     /// Post-submission review screens: a wrong and a right answer on a question with per-option explanations (multiline code option included), an old

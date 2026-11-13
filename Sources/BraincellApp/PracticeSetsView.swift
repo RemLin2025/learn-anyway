@@ -114,7 +114,7 @@ struct NewPracticeSetSheet: View {
 struct PracticeSetDetailSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    let course: Course?
     let set: PracticeSet
     var initialTemplateId: String? = nil
     @State private var items: [PracticeSetItem] = []
@@ -167,7 +167,7 @@ struct PracticeSetDetailSheet: View {
     private func reload() {
         items = (try? model.practiceSets?.items(setId: set.id)) ?? []
         specs = Dictionary(uniqueKeysWithValues: ((try? model.practiceSets?.questions(setId: set.id)) ?? []).map { ($0.id, $0) })
-        templates = (try? model.templates?.all(courseId: course.id)) ?? LearningTemplate.builtIns
+        templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns
         if let t = initialTemplateId, templates.contains(where: { $0.id == t }) { templateId = t }
     }
     private func finish() {

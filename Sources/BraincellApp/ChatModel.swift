@@ -129,7 +129,7 @@ final class ChatModel: ObservableObject {
         case "openCourse": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses }
         case "openPracticeSet": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses; app.courseTabRequest = "assessments"; app.openPracticeSetID = chip.setId }
         case "openLibrary": app.selection = .library
-        case "openQuestionBank": app.questionBankCourse = chip.courseId; app.selection = .questionBank
+        case "openQuestionBank": app.openQuestionBank(course: chip.courseId)
         case "openSkills": if let id = chip.courseId { app.selectedCourseID = id }; app.selection = .skills
         case "addFiles": pickFiles(into: chip.courseId, thenSend: true)
         case "startPractice":

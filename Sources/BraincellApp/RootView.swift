@@ -28,7 +28,6 @@ struct RootView: View {
                 case .home: HomeView()
                 case .courses: CoursesView()
                 case .library: LibraryView()
-                case .questionBank: QuestionBankView()
                 case .aiTasks: AITaskCenterView()
                 case .skills: SkillsView()
                 case .insights: InsightsView()
