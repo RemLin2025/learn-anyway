@@ -218,3 +218,71 @@ M7 practice workspaces → M5 evaluation/XP/mastery (core MVP gate) → M6 adapt
 - `Choice.why` (optional, backward compatible) holds a per-option explanation; the validator keeps it only when every option has one; the generation prompt asks for it. Old questions fall back to the saved solution with an on-demand "Explain each option with AI".
 - `QuestionTutorService` stores one conversation per attempt (`question_tutor_messages`), grounded with the question, options, key, learner's answer, explanation and verification status, and calls the existing gateway through the `chatAssistant` route (no new credential path; the model runs only when the learner sends a message).
 - Verified by unit tests (review model, validator, tutor context, failure/retry, no provider) and by screenshots of the real views (`BRAINCELL_REVIEW_SNAP`). Not verified: live model replies, VoiceOver, keyboard traversal, window resizing by hand.
+
+## Universal Library, Practice tab, guided exam preparation, Summarize Notes (migrations v23–v24)
+
+### What exists
+- **Universal Library** (sections All / Courses / Materials / Questions / Practice Sets / Templates / Favorites / Recently Deleted). Views over existing data, nothing copied. Global search (`LibrarySearchService`) covers courses, files, questions, practice sets (named after the exam, e.g. "Midterm 3 practice"), templates and note summaries. The Question Bank sidebar entry is gone; its screen with all filters, saved views and preview is Library → Questions (`AppModel.openQuestionBank` keeps old links working).
+- **Favorites** for files (existing column) plus questions, practice sets and templates (`library_favorites`); Library → Favorites lists them all. **Saved views** per section (Questions keep theirs; Materials, Practice Sets and Templates use `saved_views.category`) with contextual filters. **Recently Deleted** includes practice sets (7-day retention, Restore, Delete Now); superseded wizard plans are discarded outright, not parked there.
+- **Course → Practice tab** replaces Templates: filters, real progress, Start/Resume, Edit, Duplicate, soft Delete/Restore. Set editing is by reference (add from any course, remove, reorder with drag or the move buttons, template, name, description). Every edit bumps `practice_sets.revision`; attempts keep their own session items, so edits never change them; Resume continues the old attempt, "Start a New Attempt" uses the current questions.
+- **One exam-preparation workflow** (`ExamPrepCoordinator` on the `study_prep_jobs` row): course → materials → analyze → study-map review → template → practice settings → create. The wizard, Home, the course page and chat all use it. `exam.workflow` (chat) opens the wizard automatically for the course and assessment; `exam.prepare` (one-shot, older callers) now runs the same coordinator unreviewed, with exact-pattern reuse only. The model is called for topic analysis (once per unchanged source set) and for generating only the questions saved ones can't cover; the reuse/generate breakdown is shown before any generation call.
+- **Question reuse rules** (`PracticeSetService.prepare`): reuse takes only questions from the same course, on the slot's topic, in the requested format and difficulty range, never archived or with a failed check. Slots that follow a learned instructor archetype or carry source exemplars need the exact pattern (and a current archetype fingerprint). Topic-level reuse (a different reasoning pattern on the same topic) is opt-in per plan (on by default in the wizard, off for the one-shot path), skips questions flagged for review, and is labelled "Reused · same topic". Reuse cannot judge learning-objective wording; topic is the proxy.
+- **Summarize Notes** (Home shortcut, course Materials → Summaries, Library search): pick a course, see which materials already have a saved summary (no model call), summarize only the missing ones through the existing gateway (`summaries` task), saved per document content hash (`note_summaries`) and reopenable.
+
+### Migration safety
+All migrations are additive (v22 tutor messages; v23 practice-set columns `description/templateId/revision/updatedAt/deletedAt` and `practice_set_sessions.revision`; v24 `saved_views.category` default `questions`, `library_favorites`, `note_summaries`). v22 and v23 were registered out of numeric order on this branch; fixed before merge (no released build had them). `MigrationSafetyTests` builds a v21 database with a course, practice set and saved view, migrates it, and checks every row, the defaults, that a second migration run is a no-op, and that migrations are numerically ordered. Not tested against a copy of a real user database.
+
+### Verification
+- **Automated:** `scripts/build.sh test`, 449 tests pass (including `UniversalIntegrationTests`, `ReuseQualityTests`, `PracticeSetEditingTests`, `ExamPrepCoordinatorTests`, `QuestionTutorTests`, `MigrationSafetyTests`).
+- **End-to-end (MOCK model):** `scripts/e2e-prep.sh OUTDIR` starts `scripts/mock-model-server.py` and runs the app twice over one data directory (a real quit and relaunch in the middle). It drives the real wizard model, services, database and HTTP gateway (not the on-screen buttons) on synthetic course files. Last run: 7/7 checks in phase 1 and 21/21 in phase 2 passed (wizard opens, materials found, analysis runs once, instructor weight kept as stated, reuse breakdown before generation cost, resume after relaunch with no model call, generation, Library search by exam name, session start/exit/resume, editing a set leaves the attempt unchanged, template switch costs no call, reuse, source change reruns only topic analysis, delete/restore of a set and a course, summary reuse, gateway usage log). Model calls: 2 topic analyses, 1 generation, 1 summary; gateway recorded 4 requests, 400 input / 400 output tokens, matching what the server received.
+- **No paid or live-provider call was made.** Everything model-shaped above is a mock; it proves the app's behaviour and call counts, not real-model quality.
+- **UI inspected (screenshots of the running app):** Library sections, Practice tab, wizard steps, Recently Deleted, Summaries sheet, practice review, at full size and at 900×600. Accessibility-tree audit (`BRAINCELL_AXONLY=1`): no unlabeled controls on any new screen except two scroll-bar parts in Templates (system-provided).
+
+### Not tested in the real macOS interface
+Clicking through the wizard buttons, Home shortcut buttons, favorite stars, Views menus, the set editor sheet, move buttons, keyboard-only navigation and focus rings, VoiceOver speech, chat auto-opening the wizard from a real conversation, error/empty states for the tutor and summaries, and anything with the user's real data or a real AI provider.
+
+### Acceptance criteria
+| # | Criterion | Status | Evidence |
+|---|---|---|---|
+| U1 | Library exposes materials, questions, practice sets, templates, courses | Verified | screenshots; `universalSearchFindsEveryKind…`; e2e "set appears in Library search" |
+| U2 | Existing Question Bank filters remain | Verified | screenshot of Library → Questions; existing QuestionService tests |
+| U3 | Question Bank no separate navigation | Verified | sidebar screenshots; `.questionBank` removed |
+| U4 | Templates global and previewable | Verified | Templates screenshot; template tests |
+| U5 | Course Templates replaced by Practice | Verified | Practice tab screenshot |
+| U6 | Existing practice sets discoverable | Verified | `MigrationSafetyTests`; e2e |
+| U7 | Resume a saved attempt | Verified | `editingASetNeverChangesAnExistingAttempt…`; e2e exit/resume |
+| U8 | Edit a set, add saved questions | Verified (service) / Implemented but unverified (editor sheet clicks) | `practiceSetEditingAddsRemoves…` |
+| U9 | Cross-course add without duplication | Verified | same test (`alreadyInSet`) |
+| U10 | Editing doesn't corrupt earlier attempts | Verified | unit + e2e |
+| U11 | Home shortcuts launch workflows | Verified (what the buttons call) / Implemented but unverified (button clicks) | e2e calls `openExamPrep`; Home screenshot |
+| U12 | Chat launches the same workflow | Verified (shared job via `exam.workflow`) / Implemented but unverified (auto-open from a live chat) | `chatLaunchesTheSameWorkflow…` |
+| U13 | Unchanged materials reuse cached analysis | Verified | unit + e2e (topics called twice only after a source change) |
+| U14 | Preparation survives leaving and restart | Verified | `unfinishedPreparationSurvivesQuittingAndReopening`; two-process e2e |
+| U15 | Template change without regeneration | Verified | e2e "switching template makes no model call" |
+| U16 | Existing questions reused before generating | Verified (mock) | e2e same-shape plan reused 3 of 4; `ReuseQualityTests` |
+| U17 | New questions validated and saved | Verified (mock replies through the real validator) | `ExamPrepCoordinatorTests` |
+| U18 | Failed AI stage retried without redoing other stages | Verified | `providerFailureKeepsTopicsAndResumes…` |
+| U19 | Existing data intact | Verified (synthetic v21 database) / Not tested on a real database | `MigrationSafetyTests` |
+| U20 | Builds | Verified | `scripts/build.sh app` and `test` |
+| F1 | Favorites beyond files | Verified (storage, listing) / Implemented but unverified (star clicks) | `favoritesAndSavedViews…` |
+| F2 | Saved views across sections | Verified (storage) / Implemented but unverified (menus) | same |
+| F3 | Deleted sets in Recently Deleted; Restore works | Verified | unit + e2e + screenshot |
+| F4 | Summarize Notes guided, reuse, saved, reopenable | Verified (service, e2e reuse, sheet screenshot) / Implemented but unverified (sheet clicks, live model) | `notesAreSummarizedOnlyWhenNeeded…` |
+| F5 | `exam.prepare` and `exam.workflow` share one pipeline | Verified | `oneShotChatPathAndTheWizardShareOneJob…` |
+| F6 | Gateway records model usage accurately | Verified (mock) | e2e usage check |
+| F7 | Reuse quality (topic/format/difficulty/course/pattern) | Verified | `ReuseQualityTests` |
+| F8 | Accessibility: labels, keyboard, resize | Labels and 900×600 resize Verified; keyboard navigation and VoiceOver speech Implemented but unverified | AX audit; resize screenshots |
+| T1–T9 | Practice review: Not-quite panel gone, ✓/✗ states, Right/Your answer lines, per-option bullets, old questions readable, code and math, tutor below review | Verified | screenshots; `AnswerReviewTests`-style tests in `QuestionTutorTests` |
+| T10 | "A couple of misses" card removed from review | Implemented but unverified | code path only |
+| T11 | Tutor grounded in the question, keeps follow-up context, per-attempt conversations | Verified (mock) | `tutorSendsQuestionContext…` |
+| T12 | Tutor failures leave the review usable | Verified (service) / Implemented but unverified (error UI) | `tutorFailureKeepsMessage…` |
+| T13 | Tutor with a real provider | Not verified | no live call made |
+
+### Remaining limitations and risks
+- Everything above marked "unverified" needs hands-on testing in the installed app.
+- Topic-level reuse is a judgment call: it is labelled and optional, but it cannot see learning-objective wording.
+- Reuse can look low for a second exam (the planner rotates topics); turning topic reuse off makes it lower still.
+- `exam.prepare` is still registered for older callers (now a thin path over the coordinator).
+- Favorites cover files, questions, practice sets and templates; courses and note summaries cannot be starred.
+- Note summaries read the first 30,000 characters of a long document (stated in the sheet and the summary).
+- PRs: see the PR descriptions. Merge #8 first (a merge commit, not a squash), then #9. No other branch must merge first; local `reasoning-assessment` has one unpushed commit unrelated to these PRs.

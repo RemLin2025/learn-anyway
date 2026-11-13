@@ -5,9 +5,9 @@ import GRDB
 public enum LibraryLocation: Hashable, Sendable { case root, course(UUID), folder(UUID) }
 
 public enum LibraryKind: String, Sendable, CaseIterable {
-    case courseFolder, folder, pdf, text, image, video, other
+    case courseFolder, folder, pdf, text, image, video, other, practiceSet
     public var label: String {
-        switch self { case .courseFolder: "Course"; case .folder: "Folder"; case .pdf: "PDF"; case .text: "Text"; case .image: "Image"; case .video: "Video"; case .other: "File" }
+        switch self { case .courseFolder: "Course"; case .folder: "Folder"; case .pdf: "PDF"; case .text: "Text"; case .image: "Image"; case .video: "Video"; case .other: "File"; case .practiceSet: "Practice Set" }
     }
     public var isFolder: Bool { self == .courseFolder || self == .folder }
 }

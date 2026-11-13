@@ -1,4 +1,5 @@
 import SwiftUI
+import GRDB
 import PDFKit
 import CoreText
 import AppKit
@@ -26,6 +27,8 @@ enum SnapshotRunner {
             await modelSelfTest(model, dir: dir)
             NSApp.terminate(nil); return
         }
+        if ProcessInfo.processInfo.environment["BRAINCELL_E2E"] != nil { await prepE2E(model, dir: dir); NSApp.terminate(nil); return }
+        if ProcessInfo.processInfo.environment["BRAINCELL_UNI_SNAP"] != nil { await universalScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_REVIEW_SNAP"] != nil { await reviewScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_MATH_SNAP"] != nil { await mathScenario(model, dir: dir); NSApp.terminate(nil); return }
         if ProcessInfo.processInfo.environment["BRAINCELL_CHAT_SNAP"] != nil { await chatScenario(model, dir: dir); NSApp.terminate(nil); return }
@@ -45,7 +48,7 @@ enum SnapshotRunner {
         await shot("01-home-empty")
         model.loadDemo()
         await shot("02-course-assessments")
-        model.selection = .questionBank
+        model.openQuestionBank()
         await shot("03-question-bank")
         model.selection = .aiTasks
         await shot("04-ai-tasks")
@@ -125,7 +128,7 @@ enum SnapshotRunner {
         }
         model.reload(); model.selection = .home; chat.newChat()
         await shotWin("chat-1-empty")
-        chat.draft = SuggestionGrid.all[0].prompt
+        chat.draft = "Explain a difficult concept from my course step by step: "
         await shotWin("chat-2-suggestion-in-composer", wait: 400_000_000)
         chat.draft = "Help me prepare for my COMP301 Midterm 2 next Friday. I want a study plan and practice problems."
         chat.send()
@@ -172,7 +175,7 @@ enum SnapshotRunner {
         }
         model.selectedCourseID = c.id; model.selection = .courses
         await shotWin("tpl-1-assessments")
-        model.courseTabRequest = "templates"
+        model.librarySection = .templates; model.selection = .library
         await shotWin("tpl-2-gallery")
         if let w = try? ws.generate(setId: setId, template: .examWorksheet), let doc = PDFDocument(url: ws.url(w)) {
             try? ws.save(WorksheetAnnotation(worksheetId: w.id, page: 0, kind: .field, x: 0.2, y: 0.35, w: 0.4, h: 0.05, text: "x = 4.5"))
@@ -291,6 +294,187 @@ enum SnapshotRunner {
             v.cacheDisplay(in: v.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("s\(i)-\(s.rawValue.prefix(5)).png"))
         }
+    }
+
+    /// End-to-end run of the exam-preparation flow through the real wizard model, services, database and HTTP gateway against scripts/mock-model-server.py
+    /// (BRAINCELL_E2E_PORT, BRAINCELL_E2E_LOG). Two phases in two processes (BRAINCELL_E2E_PHASE=1,2) over one BRAINCELL_DATA_DIR so a real quit/relaunch happens in
+    /// the middle. Mocked model: results prove the app's behaviour and call counts, not live-model quality. Writes PASS/FAIL lines to e2e-log.txt.
+    static func prepE2E(_ model: AppModel, dir: URL) async {
+        let env = ProcessInfo.processInfo.environment
+        guard env["BRAINCELL_DATA_DIR"] != nil, let port = env["BRAINCELL_E2E_PORT"], let logPath = env["BRAINCELL_E2E_LOG"], let gw = model.gateway, let courses = model.courses, let docs = model.documents,
+              let ps = model.practiceSets, let practice = model.practice, let ev = model.evaluation, let lib = model.library, let qs = model.questions, let chat = model.chat else { return }
+        let phase = env["BRAINCELL_E2E_PHASE"] ?? "1"
+        var out = ""
+        func note(_ s: String) { out += s + "\n"; try? out.write(to: dir.appendingPathComponent("e2e-log-phase\(phase).txt"), atomically: true, encoding: .utf8) }
+        func check(_ name: String, _ ok: Bool, _ detail: String = "") { note("\(ok ? "PASS" : "FAIL") \(name)\(detail.isEmpty ? "" : " — " + detail)") }
+        func calls(_ kind: String) -> Int { ((try? String(contentsOfFile: logPath, encoding: .utf8)) ?? "").split(separator: "\n").filter { $0.contains("\"\(kind)\"") }.count }
+        func shot(_ name: String, sheet: Bool = false) async {
+            try? await Task.sleep(nanoseconds: 1_200_000_000)
+            let w = NSApp.windows.first(where: { $0.isVisible && ($0.attachedSheet != nil || !sheet) && $0.contentView != nil })
+            guard let v = (sheet ? w?.attachedSheet?.contentView : w?.contentView), let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("e2e\(phase)-\(name).png"))
+        }
+        func until(_ secs: Double, _ cond: @MainActor () -> Bool) async -> Bool { let end = Date().addingTimeInterval(secs); while Date() < end { if cond() { return true }; try? await Task.sleep(nanoseconds: 200_000_000) }; return cond() }
+        do {
+            let (c, _) = try await gw.connect(providerId: "custom", name: "Mock model", baseURL: "http://127.0.0.1:\(port)/v1", apiKey: "test")
+            try gw.store.setDefault(.llm, connection: c.id, model: "scripted-model")
+        } catch { note("FAIL connect — \(error.localizedDescription)"); return }
+        model.aiConfig?.reload()
+        note("phase \(phase); model calls so far — topics \(calls("topics")), questions \(calls("questions")), summary \(calls("summary"))")
+
+        if phase == "1" {
+            guard let course = try? courses.createCourse(name: "STOR435") else { return }
+            for (n, t) in [("notes.txt", "Chapter 2: Estimation. Chapter 2 is worth 40% of the exam grade.\n\nMaximum likelihood estimators maximize the likelihood. Worked example: the MLE of an exponential rate is 1/mean.\n\nConfidence intervals cover the parameter with a stated probability."), ("syllabus.txt", "Midterm 3 covers estimation and confidence intervals.")] {
+                let f = dir.appendingPathComponent(n); try? t.write(to: f, atomically: true, encoding: .utf8); _ = try? docs.importFile(at: f, courseId: course.id)
+            }
+            model.reload(); model.selection = .home; chat.newChat()
+            await shot("01-home")
+            model.openExamPrep()                                                    // exactly what the “Prepare for an exam” button calls
+            check("Prepare for an exam opens the wizard", await until(5) { ExamPrepModel.current != nil && model.prepRequest != nil })
+            guard let m = ExamPrepModel.current else { return }
+            await shot("02-course", sheet: true)
+            m.courseId = course.id; m.assessmentName = "Midterm 3"; m.begin()
+            check("course + new assessment accepted, materials step", m.step == .materials && m.job != nil, "assessments: \((try? courses.assessments(courseId: course.id).map(\.name)) ?? [])")
+            check("relevant materials found", m.materials?.readable.count == 2, "\(m.materials?.readable.map(\.name) ?? [])")
+            await shot("03-materials", sheet: true)
+            m.next(); check("no model call before analysis", calls("topics") == 0)
+            m.analyze(); _ = await until(30) { !m.busy }
+            check("analysis ran once", calls("topics") == 1 && m.map?.topics.count == 3, "topics \(m.map?.topics.map(\.name) ?? [])")
+            let est = m.map?.topics.first { $0.name == "Estimation" }
+            check("instructor weight kept as stated; estimates not presented as instructor", est?.importance.source == .instructor && est?.importance.weightPercent == 40 && m.map?.topics.first { $0.name == "Maximum likelihood" }?.importance.weightPercent == nil)
+            await shot("04-analyzed", sheet: true)
+            m.go(.review); await shot("05-review", sheet: true)
+            m.templateId = "builtin.guided"; m.saveReview(); m.go(.template); await shot("06-template", sheet: true)
+            m.go(.configure); m.count = 4; await shot("07-configure", sheet: true)
+            m.makePlan()
+            check("reuse breakdown shown before any generation cost", m.plan?.reused == 0 && m.plan?.missing == 4 && calls("questions") == 0, "plan reused \(m.plan?.reused ?? -1), to generate \(m.plan?.missing ?? -1)")
+            await shot("08-plan", sheet: true)
+            note("ENDING PHASE 1 with the workflow unfinished (step: \(m.step.rawValue)).")
+            model.prepRequest = nil; try? await Task.sleep(nanoseconds: 500_000_000)      // an open sheet would hold the app open at quit
+            return
+        }
+
+        // Phase 2: a fresh process over the same data directory.
+        guard let course = model.courseList.first(where: { $0.name == "STOR435" }) else { note("FAIL course missing after relaunch"); return }
+        model.selection = .home
+        model.openExamPrep(courseId: course.id, assessment: "Midterm 3")           // what chat's auto-open and Home both do
+        check("wizard reopens", await until(5) { ExamPrepModel.current != nil })
+        guard let m = ExamPrepModel.current else { return }
+        check("resumes at the saved step with saved choices", m.step == .create && m.templateId == "builtin.guided" && m.plan?.missing == 4 && m.map?.topics.count == 3, "step \(m.step.rawValue)")
+        check("relaunch made no model call", calls("topics") == 1 && calls("questions") == 0)
+        await shot("01-resumed", sheet: true)
+        m.generate(); _ = await until(30) { !m.busy }
+        let setsNow = (try? ps.sets(courseId: course.id)) ?? []
+        check("missing questions generated and saved", m.finished && calls("questions") >= 1 && setsNow.count == 1, "question calls \(calls("questions"))")
+        guard let set = setsNow.first else { return }
+        let items = (try? ps.items(setId: set.id)) ?? []
+        check("set has 4 saved questions", items.filter { $0.questionId != nil }.count == 4)
+        await shot("02-created", sheet: true)
+        model.prepRequest = nil
+        model.selection = .library; model.librarySection = .practiceSets; await shot("03-library-sets")
+        check("set appears in Library search", ((try? model.librarySearch?.search("Midterm"))?.hits(.practiceSet).contains { $0.key == set.id.uuidString }) == true)
+        model.selection = .courses; model.selectedCourseID = course.id; try? await Task.sleep(nanoseconds: 800_000_000); model.courseTabRequest = "practice"; await shot("04-course-practice")
+        let guided = (try? model.templates?.template("builtin.guided")) ?? .guided
+        model.startSetSession(setId: set.id, template: guided)
+        check("practice session begins", model.activeSessionID != nil)
+        let sid = model.activeSessionID
+        if let sid, let its = try? practice.items(sessionId: sid).first {
+            var r = PracticeResponse(); r.selected = ["a"]
+            if let a = try? practice.submit(itemId: its.id, response: r) { _ = try? ev.evaluate(attemptId: a.id) }
+        }
+        await shot("05-session")
+        model.activeSessionID = nil; try? await Task.sleep(nanoseconds: 500_000_000)
+        model.startSetSession(setId: set.id, template: guided)
+        let p1 = try? ps.progress(setId: set.id)
+        check("exit then resume returns to the same attempt with its answer", model.activeSessionID == sid && p1?.answered == 1 && p1?.total == 4, "answered \(p1?.answered ?? -1)/\(p1?.total ?? -1)")
+        model.activeSessionID = nil
+        // Edit the set while the attempt exists.
+        let extra = (try? qs.create(courseId: course.id, spec: QuestionSpec(type: .shortAnswer, title: "Extra question", difficulty: 2, learningObjective: "x", content: [.markdown("Name the estimator.")], answer: AnswerSpec(accepted: ["mle"]), evaluation: EvaluationSpec(method: .exact))))?.id
+        if let extra { try? ps.add(questionId: extra, to: set.id) }
+        let p2 = try? ps.progress(setId: set.id), sessionItems = sid.flatMap { try? practice.items(sessionId: $0).count }
+        check("editing the set leaves the existing attempt unchanged", p2?.answered == 1 && p2?.total == 4 && p2?.stale == true && sessionItems == 4 && ((try? ps.items(setId: set.id).count) ?? 0) == 5, "attempt \(p2?.answered ?? -1)/\(p2?.total ?? -1), set now \((try? ps.items(setId: set.id).count) ?? -1) questions")
+        let before = calls("questions")
+        try? ps.update(setId: set.id, templateId: "builtin.flashcards")
+        check("switching template makes no model call", calls("questions") == before && calls("topics") == 1)
+        // Reuse: a second assessment reuses saved questions.
+        if let co = model.chat.map({ ExamPrepCoordinator($0.ctx) }), let j = try? co.start(course: course, assessmentName: "Midterm 4"), let plan = try? co.plan(j.id, count: 4) {
+            check("existing questions are reused before generating", plan.reused > 0, "same-shape plan: reused \(plan.reused), to generate \(plan.missing)")
+            if let p3 = try? co.plan(j.id, count: 3) { note("INFO a 3-question plan: reused \(p3.reused) (\(p3.topicOnly) by topic only), to generate \(p3.missing)") }
+        } else { check("reuse plan", false) }
+        // Source change invalidates only the analysis.
+        let f = dir.appendingPathComponent("extra-notes.txt"); try? "Bootstrap resampling estimates the sampling distribution.".write(to: f, atomically: true, encoding: .utf8); _ = try? docs.importFile(at: f, courseId: course.id)
+        if let co = model.chat.map({ ExamPrepCoordinator($0.ctx) }), let j = co.existingJob(courseId: course.id, assessmentName: "Midterm 3") {
+            let stale = (try? co.materials(courseId: course.id, job: j))?.analysisStale == true
+            check("changed source marks analysis stale", stale)
+            _ = try? await co.analyze(j.id)
+            check("only the topic analysis reran", calls("topics") == 2 && calls("questions") == before, "topic calls \(calls("topics"))")
+            check("template choice and saved questions survived", ((try? co.job(j.id))?.state.templateId) == "builtin.guided" && ((try? ps.items(setId: set.id).count) ?? 0) == 5)
+        }
+        // Delete / restore.
+        try? ps.delete(setId: set.id)
+        let trash = (try? lib.recentlyDeleted()) ?? []
+        check("deleted set is in Library → Recently Deleted", trash.contains { $0.ref.kind == .practiceSet && $0.ref.id == set.id })
+        model.selection = .library; model.librarySection = .recentlyDeleted; model.reload(); await shot("06-recently-deleted")
+        if let item = trash.first(where: { $0.ref.id == set.id }) { try? lib.restore(item.ref) }
+        check("restore brings the set back with its attempt", ((try? ps.sets(courseId: course.id))?.contains { $0.id == set.id }) == true && (try? ps.progress(setId: set.id))?.answered == 1)
+        try? lib.deleteCourse(course.id); model.reload()
+        check("deleted course disappears", !model.courseList.contains { $0.id == course.id })
+        try? lib.restore(LibraryRef(id: course.id, kind: .courseFolder)); model.reload()
+        check("restored course keeps its practice set and progress", model.courseList.contains { $0.id == course.id } && (try? ps.progress(setId: set.id))?.answered == 1)
+        note("FINAL model calls — topics \(calls("topics")), questions \(calls("questions")), summary \(calls("summary"))")
+
+        // Summaries: reuse before generating.
+        model.openSummaries(courseId: course.id)
+        try? await Task.sleep(nanoseconds: 1_000_000_000)
+        if let svc = model.noteSummaries, let cand = try? svc.candidates(courseId: course.id), let first = cand.first {
+            let r1 = try? await svc.summarize(documentIds: [first.id]); let r2 = try? await svc.summarize(documentIds: [first.id])
+            check("summary generated once then reused", r1?.generated == 1 && r2?.reused == 1 && r2?.modelCalls == 0 && calls("summary") == 1, "summary calls \(calls("summary"))")
+        }
+        await shot("07-summaries", sheet: true)
+        model.summaryRequest = nil
+        // The existing AI Gateway's usage records must match what the mock server actually received (each mock reply reports 100 input + 100 output tokens).
+        if let db = model.db {
+            let rows = (try? db.read { try Row.fetchAll($0, sql: "SELECT task, status, inputTokens, outputTokens FROM ai_requests") }) ?? []
+            let ok = rows.filter { ($0["status"] as String) == "success" }
+            let total = calls("topics") + calls("questions") + calls("summary") + calls("chat")
+            let tin = ok.reduce(0) { $0 + (($1["inputTokens"] as Int?) ?? 0) }, tout = ok.reduce(0) { $0 + (($1["outputTokens"] as Int?) ?? 0) }
+            check("gateway usage log matches the requests the server received", ok.count == total && tin == 100 * total && tout == 100 * total, "recorded \(ok.count) successful requests (\(tin) in / \(tout) out tokens) vs \(total) received; tasks \(Dictionary(grouping: ok, by: { $0["task"] as String }).mapValues(\.count))")
+        }
+    }
+
+    /// Universal Library and course Practice tab screenshots on the demo workspace. Only with BRAINCELL_UNI_SNAP and a throwaway BRAINCELL_DATA_DIR.
+    static func universalScenario(_ model: AppModel, dir: URL) async {
+        guard ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
+        model.loadDemo()
+        func shot(_ name: String) async {
+            if let sz = ProcessInfo.processInfo.environment["BRAINCELL_SNAP_SIZE"]?.split(separator: "x").compactMap({ Double($0) }), sz.count == 2, let w = NSApp.windows.first(where: { $0.isVisible && $0.attachedSheet == nil }) { w.setContentSize(NSSize(width: sz[0], height: sz[1])) }     // resize check
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
+            v.cacheDisplay(in: v.bounds, to: rep)
+            try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
+        }
+        if let c = model.courseList.first, let ps = model.practiceSets, let p = model.practice, let ev = model.evaluation, let ids = try? p.questionIds(courseId: c.id), ids.count >= 5 {
+            if let a = try? ps.createEmpty(courseId: c.id, title: "Midterm 2 review", templateId: LearningTemplate.interactive.id) {
+                for q in ids.prefix(4) { try? ps.add(questionId: q, to: a.id) }
+                if let r = try? ps.startSession(setId: a.id, template: .interactive, templates: model.templates!), let its = try? p.items(sessionId: r.session.id) {
+                    for it in its.prefix(2) { var x = PracticeResponse(); x.text = "7"; x.selected = ["a"]; if let at = try? p.submit(itemId: it.id, response: x) { _ = try? ev.evaluate(attemptId: at.id) } }
+                }
+                try? ps.add(questionId: ids[4], to: a.id)                                    // edited after the attempt began
+            }
+            if let b = try? ps.createEmpty(courseId: c.id, title: "Iterators warm-up", templateId: "builtin.flashcards") { for q in ids.suffix(3) { try? ps.add(questionId: q, to: b.id) } }
+            model.reload()
+        }
+        model.selection = .library
+        for s in [LibrarySection.all, .materials, .questions, .practiceSets, .templates] { model.librarySection = s; await shot("u-\(s.rawValue.replacingOccurrences(of: " ", with: ""))") }
+        if let c = model.courseList.first { model.selectedCourseID = c.id; model.selection = .courses; try? await Task.sleep(nanoseconds: 1_500_000_000); model.courseTabRequest = "practice"; await shot("u-coursePractice") }
+        model.selection = .home; model.selectedCourseID = model.courseList.first?.id
+        model.openExamPrep(courseId: model.courseList.first?.id, assessment: "Midterm 2")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.attachedSheet != nil }), let sv = w.attachedSheet?.contentView, let rep = sv.bitmapImageRepForCachingDisplay(in: sv.bounds) {
+            sv.cacheDisplay(in: sv.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("u-prepWizard.png"))
+        }
+        model.prepRequest = nil
+        model.selection = .home; await shot("u-home")
     }
 
     /// Post-submission review screens: a wrong and a right answer on a question with per-option explanations (multiline code option included), an old
@@ -505,6 +689,37 @@ enum SnapshotRunner {
             walk(root, 0)
             log.append("AX \(item.rawValue): \(roles.values.reduce(0, +)) elements; unlabeled controls: \(unlabeled.count)")
             for u in unlabeled { log.append("    · " + u) }
+        }
+        // Universal Library sections, the course Practice tab and the new sheets: every control must expose a label to VoiceOver.
+        func auditRoot(_ name: String, _ root: NSView?) {
+            guard let root else { log.append("AX \(name): not on screen"); return }
+            var n = 0, unl: [String] = []
+            func has(_ a: NSAccessibilityProtocol) -> Bool { [a.accessibilityLabel(), a.accessibilityTitle(), a.accessibilityHelp(), a.accessibilityValue() as? String].compactMap { $0 }.contains { !$0.isEmpty } }
+            func descendants(_ a: NSAccessibilityProtocol, _ d: Int = 0) -> Bool { d <= 4 && (a.accessibilityChildren() ?? []).contains { ($0 as? NSAccessibilityProtocol).map { has($0) || descendants($0, d + 1) } ?? false } }
+            func walk(_ el: Any, _ d: Int) {
+                guard d < 80, let a = el as? NSAccessibilityProtocol else { return }
+                n += 1
+                let role = a.accessibilityRole()?.rawValue ?? ""
+                if ["AXButton", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXTextField", "AXTextArea", "AXMenuButton", "AXStepper", "AXSlider"].contains(role), !has(a), !descendants(a), a.accessibilityFrame().width > 1 {
+                    let f = a.accessibilityFrame(); unl.append("\(role) at (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))")
+                }
+                for c in a.accessibilityChildren() ?? [] { walk(c, d + 1) }
+            }
+            walk(root, 0)
+            log.append("AX \(name): \(n) elements; unlabeled controls: \(unl.count)"); for u in unl { log.append("    · " + u) }
+        }
+        model.loadDemo()
+        for sec in LibrarySection.allCases {
+            model.selection = .library; model.librarySection = sec; try? await Task.sleep(nanoseconds: 1_500_000_000)
+            auditRoot("Library › \(sec.rawValue)", NSApp.windows.first(where: { $0.isVisible })?.contentView)
+        }
+        if let c = model.courseList.first {
+            model.selectedCourseID = c.id; model.selection = .courses; try? await Task.sleep(nanoseconds: 1_200_000_000); model.courseTabRequest = "practice"; try? await Task.sleep(nanoseconds: 1_500_000_000)
+            auditRoot("Course › Practice", NSApp.windows.first(where: { $0.isVisible })?.contentView)
+            model.openExamPrep(courseId: c.id, assessment: "Midterm 2"); try? await Task.sleep(nanoseconds: 1_800_000_000)
+            auditRoot("Prepare for an exam (wizard)", NSApp.windows.first(where: { $0.attachedSheet != nil })?.attachedSheet?.contentView); model.prepRequest = nil; try? await Task.sleep(nanoseconds: 600_000_000)
+            model.openSummaries(courseId: c.id); try? await Task.sleep(nanoseconds: 1_800_000_000)
+            auditRoot("Summarize notes (sheet)", NSApp.windows.first(where: { $0.attachedSheet != nil })?.attachedSheet?.contentView); model.summaryRequest = nil; try? await Task.sleep(nanoseconds: 600_000_000)
         }
         // Practice screens, one per question type.
         if let c = model.courseList.first, let ids = try? model.practice?.questionIds(courseId: c.id), !ids.isEmpty {

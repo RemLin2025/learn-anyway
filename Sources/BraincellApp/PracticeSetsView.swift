@@ -16,7 +16,7 @@ struct PracticeSetsSection: View {
             HStack {
                 Text("Practice Sets").font(Theme.sectionTitle)
                 Spacer()
-                Button { model.courseTabRequest = "templates"; model.selectedCourseID = course.id } label: { Label("Templates", systemImage: "square.grid.2x2") }.buttonStyle(.secondary)
+                Button { model.librarySection = .templates; model.selection = .library } label: { Label("Templates", systemImage: "square.grid.2x2") }.buttonStyle(.secondary)
                 Button { showNew = true } label: { Label("New Practice Set", systemImage: "plus") }.buttonStyle(.primary)
             }
             if sets.isEmpty {
@@ -43,7 +43,7 @@ struct PracticeSetsSection: View {
     private func load() { sets = ((try? model.practiceSets?.sets(courseId: course.id)) ?? []).filter { assessment == nil || $0.assessmentId == assessment?.id } }
 
     private func row(_ s: PracticeSet) -> some View {
-        let it = (try? model.practiceSets?.items(setId: s.id)) ?? [], filled = it.filter { $0.questionId != nil }.count, reused = it.filter { $0.origin == "reused" }.count
+        let it = (try? model.practiceSets?.items(setId: s.id)) ?? [], filled = it.filter { $0.questionId != nil }.count, reused = it.filter(\.isReused).count
         return HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text(s.title).font(Theme.cardTitle)
@@ -114,7 +114,7 @@ struct NewPracticeSetSheet: View {
 struct PracticeSetDetailSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    let course: Course?
     let set: PracticeSet
     var initialTemplateId: String? = nil
     @State private var items: [PracticeSetItem] = []
@@ -159,7 +159,7 @@ struct PracticeSetDetailSheet: View {
                     Text("\(s.topic ?? "") · \(s.spec.type.rawValue.replacingOccurrences(of: "_", with: " ")) · difficulty \(s.spec.difficulty)").font(.caption).foregroundStyle(Theme.textSecondary)
                     if let v = try? model.practiceSets?.verification(questionId: q) { Text(v.text).font(.caption2).foregroundStyle(v.level == .recomputed ? Theme.mastery : v.level == .failed ? Theme.error : Theme.textSecondary) }
                 }
-                Spacer(); Badge(text: it.origin == "reused" ? "Reused" : "Generated", color: it.origin == "reused" ? Theme.accent : Theme.mastery)
+                Spacer(); Badge(text: it.isTopicOnlyReuse ? "Reused · same topic" : (it.isReused ? "Reused" : (it.origin == "added" ? "Added" : "Generated")), color: it.isReused ? Theme.accent : Theme.mastery)
             } else { Text("Not generated yet").foregroundStyle(Theme.attention); Spacer() }
         }
     }
@@ -167,8 +167,8 @@ struct PracticeSetDetailSheet: View {
     private func reload() {
         items = (try? model.practiceSets?.items(setId: set.id)) ?? []
         specs = Dictionary(uniqueKeysWithValues: ((try? model.practiceSets?.questions(setId: set.id)) ?? []).map { ($0.id, $0) })
-        templates = (try? model.templates?.all(courseId: course.id)) ?? LearningTemplate.builtIns
-        if let t = initialTemplateId, templates.contains(where: { $0.id == t }) { templateId = t }
+        templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns
+        if let t = initialTemplateId ?? set.templateId, templates.contains(where: { $0.id == t }) { templateId = t }
     }
     private func finish() {
         guard let svc = model.practiceSets, let gw = model.gateway else { return }

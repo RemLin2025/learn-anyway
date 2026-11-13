@@ -46,13 +46,13 @@ extension LibraryKind {
     var symbol: String {
         switch self {
         case .courseFolder: "graduationcap.fill"; case .folder: "folder.fill"; case .pdf: "doc.richtext.fill"
-        case .text: "doc.text.fill"; case .image: "photo.fill"; case .video: "film.fill"; case .other: "doc.fill"
+        case .text: "doc.text.fill"; case .image: "photo.fill"; case .video: "film.fill"; case .other: "doc.fill"; case .practiceSet: "list.bullet.rectangle"
         }
     }
     var tint: Color {
         switch self {
         case .courseFolder: Theme.accent; case .folder: Theme.accent; case .pdf: Theme.error; case .text: Color(hex: 0x4C8DF6)
-        case .image: Theme.mastery; case .video: Theme.attention; case .other: Theme.textSecondary
+        case .image: Theme.mastery; case .video: Theme.attention; case .other: Theme.textSecondary; case .practiceSet: Theme.accent
         }
     }
 }

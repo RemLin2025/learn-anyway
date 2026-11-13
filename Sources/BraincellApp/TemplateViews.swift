@@ -4,12 +4,15 @@ import BraincellCore
 /// The Learning Template Library. Every preview is the real renderer applied to sample questions; nothing here is a placeholder.
 struct TemplateGalleryView: View {
     @EnvironmentObject var model: AppModel
-    let course: Course
+    /// nil = the global Library view: templates are shared by every course.
+    var course: Course? = nil
     @State private var templates: [LearningTemplate] = []
     @State private var editing: LearningTemplate?
     @State private var showAI = false
     @State private var detail: (PracticeSet, String)?
     @State private var showNew = false
+    @State private var f = TemplatesViewFilter()
+    @State private var favs: Set<String> = []
 
     private let examples = TemplateExamples.questions.map { (UUID(), $0, Optional("Probability")) }
 
@@ -19,27 +22,46 @@ struct TemplateGalleryView: View {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) { Text("Learning Templates").font(Theme.sectionTitle); Text("How a saved practice set is presented. Switching template never regenerates questions.").font(.callout).foregroundStyle(Theme.textSecondary) }
                     Spacer()
+                    SearchField(prompt: "Search templates", text: $f.text).frame(maxWidth: 200)
+                    FilterMenu(title: "Origin", selection: Binding(get: { f.origin == "All" ? nil : f.origin }, set: { f.origin = $0 ?? "All" }), options: ["Built-in", "Custom"].map { ($0, $0) })
+                    Toggle(isOn: $f.favoritesOnly) { Image(systemName: f.favoritesOnly ? "star.fill" : "star") }.toggleStyle(.button).help("Favorites only").accessibilityLabel("Favorites only")
+                    SavedViewsMenu(category: "templates", current: f) { f = $0 }
                     Button { showAI = true } label: { Label("Create with AI", systemImage: "sparkles") }.buttonStyle(.secondary)
                 }
+                if shown.isEmpty { EmptyStateView(symbol: "rectangle.3.group", title: "No templates match", message: "Adjust or clear the filters.", actionTitle: "Clear Filters") { f = TemplatesViewFilter() } }
                 LazyVGrid(columns: [GridItem(.adaptive(minimum: 340), spacing: Theme.Space.lg, alignment: .top)], alignment: .leading, spacing: Theme.Space.lg) {
-                    ForEach(templates) { t in card(t) }
+                    ForEach(shown) { t in card(t) }
                 }
             }.padding(Theme.Space.xl)
         }
         .task(id: model.revision) { reload() }
         .sheet(item: $editing) { t in TemplateEditorSheet(course: course, template: t) { reload() } }
         .sheet(isPresented: $showAI) { AITemplateSheet(course: course) { editing = $0 } }
-        .sheet(isPresented: $showNew) { NewPracticeSetSheet(course: course, assessment: nil) { id in showNew = false; detail = (try? model.practiceSets?.practiceSet(id)).map { ($0, "") } } }
-        .sheet(item: Binding(get: { detail.map { IdentifiedSet(practiceSet: $0.0, templateId: $0.1) } }, set: { if $0 == nil { detail = nil } })) { PracticeSetDetailSheet(course: course, set: $0.practiceSet, initialTemplateId: $0.templateId.isEmpty ? nil : $0.templateId) }
+        .sheet(isPresented: $showNew) { if let course { NewPracticeSetSheet(course: course, assessment: nil) { id in showNew = false; detail = (try? model.practiceSets?.practiceSet(id)).map { ($0, "") } } } }
+        .sheet(item: Binding(get: { detail.map { IdentifiedSet(practiceSet: $0.0, templateId: $0.1) } }, set: { if $0 == nil { detail = nil } })) { PracticeSetDetailSheet(course: course ?? courseFor($0.practiceSet), set: $0.practiceSet, initialTemplateId: $0.templateId.isEmpty ? nil : $0.templateId) }
     }
 
-    private func reload() { templates = (try? model.templates?.all(courseId: course.id)) ?? LearningTemplate.builtIns }
+    private func courseFor(_ s: PracticeSet) -> Course? { model.courseList.first { $0.id == s.courseId } }
+    private func recentSets() -> [PracticeSet] {
+        let all: [PracticeSet]? = course.map { try? model.practiceSets?.sets(courseId: $0.id) ?? [] } ?? (try? model.practiceSets?.allSets())
+        return Array((all ?? []).prefix(10))
+    }
+    private var shown: [LearningTemplate] {
+        templates.filter { t in
+            (f.text.trimmed.isEmpty || LibrarySearchService.matches(f.text, in: t.name + " " + t.description))
+            && (f.origin == "All" || (f.origin == "Built-in") == t.isBuiltIn)
+            && (!f.favoritesOnly || favs.contains(t.id))
+        }
+    }
+    private func toggleFav(_ t: LearningTemplate) { let on = !favs.contains(t.id); model.perform { try model.favorites?.set(.template, t.id, on) }; favs = (try? model.favorites?.ids(.template)) ?? [] }
+    private func reload() { favs = (try? model.favorites?.ids(.template)) ?? []; templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns }
 
     @ViewBuilder private func card(_ t: LearningTemplate) -> some View {
         let doc = RenderBuilder.build(template: t, title: t.kind == .flashcards ? "Flashcards" : "Sample", questions: examples)
         Card(padding: 16) {
             VStack(alignment: .leading, spacing: 10) {
-                HStack { Text(t.name).font(Theme.cardTitle); Badge(text: t.kind.title); if t.isBuiltIn { Badge(text: "Built-in", color: Theme.mastery) } else if t.baseId != nil { Badge(text: "Customized") } }
+                HStack { Text(t.name).font(Theme.cardTitle); Badge(text: t.kind.title); if t.isBuiltIn { Badge(text: "Built-in", color: Theme.mastery) } else if t.baseId != nil { Badge(text: "Customized") }
+                    Spacer(); Button { toggleFav(t) } label: { Image(systemName: favs.contains(t.id) ? "star.fill" : "star").foregroundStyle(favs.contains(t.id) ? Theme.attention : Theme.textSecondary).frame(width: 30, height: 28).contentShape(Rectangle()) }.buttonStyle(.plain).help(favs.contains(t.id) ? "Remove from Favorites" : "Add to Favorites").accessibilityLabel(favs.contains(t.id) ? "Remove \(t.name) from Favorites" : "Add \(t.name) to Favorites") }
                 Text(t.description).font(.callout).foregroundStyle(Theme.textSecondary)
                 RenderDocumentView(doc: doc, limit: t.kind == .flashcards ? 1 : 2).frame(height: 230, alignment: .top).clipped().overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
                     .accessibilityLabel("Preview of \(t.name)")
@@ -47,10 +69,10 @@ struct TemplateGalleryView: View {
                 Text(customization(t)).font(.caption).foregroundStyle(Theme.textSecondary)
                 HStack {
                     Menu {
-                        let sets = ((try? model.practiceSets?.sets(courseId: course.id)) ?? []).prefix(10)
-                        ForEach(Array(sets)) { s in Button(s.title + " · " + s.createdAt.formatted(date: .abbreviated, time: .omitted)) { detail = (s, t.id) } }
-                        if !sets.isEmpty { Divider() }
-                        Button("New practice set…") { showNew = true }
+                        let sets = recentSets()
+                        ForEach(sets) { s in Button(s.title + " · " + s.createdAt.formatted(date: .abbreviated, time: .omitted)) { detail = (s, t.id) } }
+                        if !sets.isEmpty, course != nil { Divider() }
+                        if course != nil { Button("New practice set…") { showNew = true } }
                     } label: { Label(t.kind == .examWorksheet ? "Create worksheet" : "Start practice", systemImage: "play.fill") }.menuStyle(.button).fixedSize()
                     Button("Duplicate & customize") { if let d = try? model.templates?.duplicate(t.id) { editing = d } }.buttonStyle(.secondary)
                     if !t.isBuiltIn { Button("Edit") { editing = t }.buttonStyle(.secondary); Button("Delete", role: .destructive) { model.perform { try model.templates?.delete(t.id) }; reload() } }
@@ -79,7 +101,7 @@ struct IdentifiedSet: Identifiable, Equatable {
 struct TemplateEditorSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    let course: Course?
     @State var template: LearningTemplate
     let saved: () -> Void
     @State private var global = true
@@ -114,12 +136,12 @@ struct TemplateEditorSheet: View {
                     FlowLayout(spacing: 6) { ForEach(QuestionType.allCases, id: \.self) { q in
                         Toggle(q.rawValue.replacingOccurrences(of: "_", with: " "), isOn: Binding(get: { template.supportedFormats.contains(q.rawValue) }, set: { on in template.supportedFormats.removeAll { $0 == q.rawValue }; if on { template.supportedFormats.append(q.rawValue) } })).toggleStyle(.button)
                     } }
-                    Toggle("Available in every course", isOn: $global)
+                    if course != nil { Toggle("Available in every course", isOn: $global) }
                 }
             }.frame(maxHeight: 420)
             ForEach(issues, id: \.self) { Text($0).font(.caption).foregroundStyle(Theme.error) }
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)
-                Button("Save") { model.perform { try model.templates?.save(template, courseId: global ? nil : course.id) }; saved(); dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(!issues.isEmpty) }
+                Button("Save") { model.perform { try model.templates?.save(template, courseId: global ? nil : course?.id) }; saved(); dismiss() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(!issues.isEmpty) }
         }.dialogSurface(width: 560)
     }
 }
@@ -128,7 +150,7 @@ struct TemplateEditorSheet: View {
 struct AITemplateSheet: View {
     @EnvironmentObject var model: AppModel
     @Environment(\.dismiss) private var dismiss
-    let course: Course
+    var course: Course? = nil
     let use: (LearningTemplate) -> Void
     @State private var text = ""
     @State private var busy = false
