@@ -127,7 +127,7 @@ final class ChatModel: ObservableObject {
     func perform(_ chip: ActionChip) {
         switch chip.action {
         case "openCourse": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses }
-        case "openPracticeSet": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses; app.courseTabRequest = "assessments"; app.openPracticeSetID = chip.setId }
+        case "openPracticeSet": if let id = chip.courseId { app.selectedCourseID = id; app.selection = .courses; app.courseTabRequest = "practice"; app.openPracticeSetID = chip.setId }
         case "openLibrary": app.selection = .library
         case "openQuestionBank": app.openQuestionBank(course: chip.courseId)
         case "openSkills": if let id = chip.courseId { app.selectedCourseID = id }; app.selection = .skills

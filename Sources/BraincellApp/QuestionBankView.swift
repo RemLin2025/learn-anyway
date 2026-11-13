@@ -16,6 +16,9 @@ struct QuestionBankView: View {
     @State private var tagging = false
     @State private var saveName = ""
     @State private var saving = false
+    @State private var newSetIds: [UUID]?
+    @State private var newSetCourse: UUID?
+    @State private var newSetName = ""
 
     var body: some View {
         VStack(spacing: 0) {
@@ -42,6 +45,12 @@ struct QuestionBankView: View {
         .onChange(of: selection) { _, _ in loadDetail() }
         .sheet(item: $editing) { QuestionEditor(detail: $0) }
         .sheet(isPresented: $tagging) { SkillTagSheet(questionIds: Array(selection), skills: skills) }
+        .sheet(isPresented: Binding(get: { newSetIds != nil }, set: { if !$0 { newSetIds = nil } })) {
+            NameSheet(title: "New Practice Set", prompt: "Set name", text: $newSetName, confirm: "Create & Add") {
+                if let ids = newSetIds, let c = newSetCourse, let svc = model.practiceSets, let s = try? svc.createEmpty(courseId: c, title: newSetName) { addToSet(ids, s) }
+                newSetIds = nil
+            }
+        }
         .sheet(isPresented: $saving) { NameSheet(title: "Save View", prompt: "View name", text: $saveName, confirm: "Save") {
             model.perform { try model.questions?.saveView(name: saveName, filter: filter) }; saveName = "" } }
     }
@@ -124,6 +133,7 @@ struct QuestionBankView: View {
             model.generateRequest = GenerateRequest(courseId: r.question.courseId, skillIds: d?.skills.map(\.id) ?? [], notes: "Create variations similar to: “\(r.title)”")
         }
         Button("Change Skill Tags…") { selection = Set(ids); loadSkills(for: r.question.courseId); tagging = true }
+        addToSetMenu(ids, course: r.question.courseId)
         Menu("Add to Assessment") {
             let asm = (try? model.courses?.assessments(courseId: r.question.courseId)) ?? []
             if asm.isEmpty { Text("No assessments in this course") }
@@ -136,10 +146,27 @@ struct QuestionBankView: View {
         }
     }
 
+    /// Adds by reference, to a set in any course. A question already in the set is skipped, never duplicated.
+    @ViewBuilder private func addToSetMenu(_ ids: [UUID], course: UUID) -> some View {
+        Menu("Add to Practice Set") {
+            let sets = ((try? model.practiceSets?.allSets()) ?? []).prefix(15)
+            ForEach(Array(sets)) { s in Button(s.title + " · " + (model.courseList.first { $0.id == s.courseId }?.name ?? "")) { addToSet(ids, s) } }
+            if !sets.isEmpty { Divider() }
+            Button("New Practice Set…") { newSetIds = ids; newSetCourse = course; newSetName = "" }
+        }
+    }
+    private func addToSet(_ ids: [UUID], _ s: PracticeSet) {
+        var added = 0, skipped = 0
+        for q in ids { do { try model.practiceSets?.add(questionId: q, to: s.id); added += 1 } catch PracticeSetError.alreadyInSet { skipped += 1 } catch { model.alertMessage = error.localizedDescription; return } }
+        model.reload()
+        model.alertMessage = "Added \(added) question\(added == 1 ? "" : "s") to “\(s.title)”" + (skipped > 0 ? " (\(skipped) already in the set)." : ".")
+    }
+
     private var bulkPanel: some View {
         VStack(spacing: 14) {
             Text("\(selection.count) questions selected").font(Theme.sectionTitle)
             HStack {
+                addToSetMenu(Array(selection), course: rows.first(where: { selection.contains($0.id) })?.question.courseId ?? UUID())
                 Button("Archive") { model.perform { try model.questions?.setArchived(Array(selection), archived: true) }; selection = [] }
                 Button("Change Skill Tags…") {
                     if let first = rows.first(where: { selection.contains($0.id) }) { loadSkills(for: first.question.courseId) }

@@ -274,10 +274,10 @@ final class AppModel: ObservableObject {
     }
 
     /// Starts (or resumes) a session for a saved practice set in a template. Questions are never regenerated.
-    func startSetSession(setId: UUID, template: LearningTemplate) {
+    func startSetSession(setId: UUID, template: LearningTemplate, newAttempt: Bool = false) {
         perform {
             guard let practiceSets, let templates else { return }
-            let r = try practiceSets.startSession(setId: setId, template: template, templates: templates)
+            let r = try practiceSets.startSession(setId: setId, template: template, templates: templates, newAttempt: newAttempt)
             activeSessionID = r.session.id
             if !r.skipped.isEmpty { alertMessage = "\(r.skipped.count) question(s) aren’t part of \(template.name) and were left out of this session." }
         }

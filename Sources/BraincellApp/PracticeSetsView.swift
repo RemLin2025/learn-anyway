@@ -16,7 +16,7 @@ struct PracticeSetsSection: View {
             HStack {
                 Text("Practice Sets").font(Theme.sectionTitle)
                 Spacer()
-                Button { model.courseTabRequest = "templates"; model.selectedCourseID = course.id } label: { Label("Templates", systemImage: "square.grid.2x2") }.buttonStyle(.secondary)
+                Button { model.librarySection = .templates; model.selection = .library } label: { Label("Templates", systemImage: "square.grid.2x2") }.buttonStyle(.secondary)
                 Button { showNew = true } label: { Label("New Practice Set", systemImage: "plus") }.buttonStyle(.primary)
             }
             if sets.isEmpty {
@@ -168,7 +168,7 @@ struct PracticeSetDetailSheet: View {
         items = (try? model.practiceSets?.items(setId: set.id)) ?? []
         specs = Dictionary(uniqueKeysWithValues: ((try? model.practiceSets?.questions(setId: set.id)) ?? []).map { ($0.id, $0) })
         templates = (try? model.templates?.all(courseId: course?.id)) ?? LearningTemplate.builtIns
-        if let t = initialTemplateId, templates.contains(where: { $0.id == t }) { templateId = t }
+        if let t = initialTemplateId ?? set.templateId, templates.contains(where: { $0.id == t }) { templateId = t }
     }
     private func finish() {
         guard let svc = model.practiceSets, let gw = model.gateway else { return }

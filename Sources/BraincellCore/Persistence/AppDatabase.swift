@@ -923,6 +923,16 @@ public final class AppDatabase: Sendable {
             }
             try db.create(index: "worksheet_annotations_on_sheet", on: "worksheet_annotations", columns: ["worksheetId", "page"])
         }
+        m.registerMigration("v23_practice_set_editing") { db in           // additive: existing sets keep working and start at revision 1
+            try db.alter(table: "practice_sets") { t in
+                t.add(column: "description", .text)
+                t.add(column: "templateId", .text)                      // the template the learner last chose for this set (global templates, by id)
+                t.add(column: "revision", .integer).notNull().defaults(to: 1)
+                t.add(column: "updatedAt", .datetime)
+                t.add(column: "deletedAt", .datetime)                   // soft delete: recoverable, questions and past sessions are never touched
+            }
+            try db.alter(table: "practice_set_sessions") { t in t.add(column: "revision", .integer).notNull().defaults(to: 1) }
+        }
         m.registerMigration("v22_question_tutor") { db in
             try db.create(table: "question_tutor_messages") { t in      // one short conversation per attempt; additive, nothing else changes
                 t.primaryKey("id", .blob)

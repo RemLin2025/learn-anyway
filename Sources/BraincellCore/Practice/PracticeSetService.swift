@@ -8,6 +8,11 @@ public struct PracticeSet: Sendable, Equatable, Identifiable {
     public var fresh: Bool
     public var taskId: UUID?
     public var createdAt: Date
+    public var description: String? = nil
+    public var templateId: String? = nil
+    public var revision: Int = 1
+    public var updatedAt: Date? = nil
+    public var deletedAt: Date? = nil
 }
 
 public struct PracticeSetItem: Sendable, Equatable {
@@ -119,10 +124,11 @@ public final class PracticeSetService: @unchecked Sendable {
     func existing(courseId: UUID, key: String) throws -> PracticeSet? {
         try db.read { d in try Row.fetchOne(d, sql: "SELECT * FROM practice_sets WHERE courseId = ? AND requestKey = ?", arguments: [courseId, key]).map(Self.set) }
     }
-    static func set(_ r: Row) -> PracticeSet { PracticeSet(id: r["id"], courseId: r["courseId"], assessmentId: r["assessmentId"], title: r["title"], fresh: r["fresh"], taskId: r["taskId"], createdAt: r["createdAt"]) }
+    static func set(_ r: Row) -> PracticeSet { PracticeSet(id: r["id"], courseId: r["courseId"], assessmentId: r["assessmentId"], title: r["title"], fresh: r["fresh"], taskId: r["taskId"], createdAt: r["createdAt"],
+                                                        description: r["description"], templateId: r["templateId"], revision: r["revision"] ?? 1, updatedAt: r["updatedAt"], deletedAt: r["deletedAt"]) }
     public func practiceSet(_ id: UUID) throws -> PracticeSet? { try db.read { try Row.fetchOne($0, sql: "SELECT * FROM practice_sets WHERE id = ?", arguments: [id]).map(Self.set) } }
-    public func allSets() throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets ORDER BY createdAt DESC").map(Self.set) } }
-    public func sets(courseId: UUID) throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE courseId = ? ORDER BY createdAt DESC", arguments: [courseId]).map(Self.set) } }
+    public func allSets() throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE deletedAt IS NULL ORDER BY createdAt DESC").map(Self.set) } }
+    public func sets(courseId: UUID) throws -> [PracticeSet] { try db.read { try Row.fetchAll($0, sql: "SELECT * FROM practice_sets WHERE courseId = ? AND deletedAt IS NULL ORDER BY createdAt DESC", arguments: [courseId]).map(Self.set) } }
 
     public func items(setId: UUID) throws -> [PracticeSetItem] {
         try db.read { d in try Row.fetchAll(d, sql: "SELECT slotJSON, position, questionId, origin FROM practice_set_items WHERE setId = ? ORDER BY position", arguments: [setId]).compactMap { r in
@@ -208,16 +214,16 @@ public final class PracticeSetService: @unchecked Sendable {
     /// Starts (or resumes) a study session for a saved set presented by a template. The same questions can be practised under any compatible template;
     /// an unfinished session for the same (set, template) is reopened, so interrupted progress is never discarded.
     @discardableResult
-    public func startSession(setId: UUID, template: LearningTemplate, templates: TemplateService) throws -> (session: StudySession, resumed: Bool, skipped: [String]) {
+    public func startSession(setId: UUID, template: LearningTemplate, templates: TemplateService, newAttempt: Bool = false) throws -> (session: StudySession, resumed: Bool, skipped: [String]) {
         guard let s = try practiceSet(setId) else { throw AITaskError.notFound }
         let practice = PracticeService(db: db)
-        if let sid = try db.read({ try UUID.fetchOne($0, sql: "SELECT ps.sessionId FROM practice_set_sessions ps JOIN study_sessions s ON s.id = ps.sessionId WHERE ps.setId = ? AND ps.templateId = ? AND s.status != 'completed' ORDER BY ps.createdAt DESC", arguments: [setId, template.id]) }),
+        if !newAttempt, let sid = try db.read({ try UUID.fetchOne($0, sql: "SELECT ps.sessionId FROM practice_set_sessions ps JOIN study_sessions s ON s.id = ps.sessionId WHERE ps.setId = ? AND ps.templateId = ? AND s.status != 'completed' ORDER BY ps.createdAt DESC", arguments: [setId, template.id]) }),
            let existing = try? practice.session(sid) { return (existing, true, []) }
         let qs = try questions(setId: setId)
         let compat = templates.compatibility(template: template, items: qs.map { ($0.id, $0.spec, $0.topic) })
         guard !compat.usable.isEmpty else { throw PracticeError.noQuestions }
         let session = try practice.start(questionIds: compat.usable, title: "\(s.title) · \(template.name)", courseId: s.courseId, assessmentId: s.assessmentId)
-        try db.write { try $0.execute(sql: "INSERT OR IGNORE INTO practice_set_sessions (setId, templateId, sessionId, createdAt) VALUES (?,?,?,?)", arguments: [setId, template.id, session.id, Date()]) }
+        try db.write { try $0.execute(sql: "INSERT OR IGNORE INTO practice_set_sessions (setId, templateId, sessionId, createdAt, revision) VALUES (?,?,?,?,?)", arguments: [setId, template.id, session.id, Date(), s.revision]) }
         return (session, false, compat.skipped.map(\.reason))
     }
 

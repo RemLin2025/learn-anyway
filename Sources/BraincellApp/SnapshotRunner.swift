@@ -173,7 +173,7 @@ enum SnapshotRunner {
         }
         model.selectedCourseID = c.id; model.selection = .courses
         await shotWin("tpl-1-assessments")
-        model.courseTabRequest = "templates"
+        model.librarySection = .templates; model.selection = .library
         await shotWin("tpl-2-gallery")
         if let w = try? ws.generate(setId: setId, template: .examWorksheet), let doc = PDFDocument(url: ws.url(w)) {
             try? ws.save(WorksheetAnnotation(worksheetId: w.id, page: 0, kind: .field, x: 0.2, y: 0.35, w: 0.4, h: 0.05, text: "x = 4.5"))
@@ -304,9 +304,20 @@ enum SnapshotRunner {
             v.cacheDisplay(in: v.bounds, to: rep)
             try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("\(name).png"))
         }
+        if let c = model.courseList.first, let ps = model.practiceSets, let p = model.practice, let ev = model.evaluation, let ids = try? p.questionIds(courseId: c.id), ids.count >= 5 {
+            if let a = try? ps.createEmpty(courseId: c.id, title: "Midterm 2 review", templateId: LearningTemplate.interactive.id) {
+                for q in ids.prefix(4) { try? ps.add(questionId: q, to: a.id) }
+                if let r = try? ps.startSession(setId: a.id, template: .interactive, templates: model.templates!), let its = try? p.items(sessionId: r.session.id) {
+                    for it in its.prefix(2) { var x = PracticeResponse(); x.text = "7"; x.selected = ["a"]; if let at = try? p.submit(itemId: it.id, response: x) { _ = try? ev.evaluate(attemptId: at.id) } }
+                }
+                try? ps.add(questionId: ids[4], to: a.id)                                    // edited after the attempt began
+            }
+            if let b = try? ps.createEmpty(courseId: c.id, title: "Iterators warm-up", templateId: "builtin.flashcards") { for q in ids.suffix(3) { try? ps.add(questionId: q, to: b.id) } }
+            model.reload()
+        }
         model.selection = .library
         for s in [LibrarySection.all, .materials, .questions, .practiceSets, .templates] { model.librarySection = s; await shot("u-\(s.rawValue.replacingOccurrences(of: " ", with: ""))") }
-        if let c = model.courseList.first { model.selectedCourseID = c.id; model.selection = .courses; model.courseTabRequest = "practice"; await shot("u-coursePractice") }
+        if let c = model.courseList.first { model.selectedCourseID = c.id; model.selection = .courses; try? await Task.sleep(nanoseconds: 1_500_000_000); model.courseTabRequest = "practice"; await shot("u-coursePractice") }
     }
 
     /// Post-submission review screens: a wrong and a right answer on a question with per-option explanations (multiline code option included), an old

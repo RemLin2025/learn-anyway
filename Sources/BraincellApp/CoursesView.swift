@@ -72,7 +72,7 @@ struct NameSheet: View {
 }
 
 struct CourseDetailView: View {
-    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials", templates = "Templates" }
+    enum Tab: String, CaseIterable { case assessments = "Assessments", topics = "Topics", materials = "Materials", practice = "Practice" }
 
     @EnvironmentObject var model: AppModel
     let course: Course
@@ -115,7 +115,7 @@ struct CourseDetailView: View {
                 case .assessments: AssessmentsTab(course: course)
                 case .topics: TopicsTab(course: course)
                 case .materials: MaterialsTab(course: course)
-                case .templates: TemplateGalleryView(course: course)
+                case .practice: CoursePracticeTab(course: course)
                 }
             }
         }
