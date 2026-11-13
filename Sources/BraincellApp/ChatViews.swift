@@ -90,26 +90,37 @@ struct ChatWorkspace: View {
 
 struct SuggestionGrid: View {
     @ObservedObject var chat: ChatModel
-    struct S: Identifiable { let id: String; let symbol: String; let title: String; let prompt: String }
+    struct S: Identifiable { let id: String; let symbol: String; let title: String; let hint: String }
     static let all: [S] = [
-        S(id: "plan", symbol: "calendar", title: "Plan my midterm", prompt: "Help me prepare for an upcoming midterm using my course materials."),
-        S(id: "practice", symbol: "checklist", title: "Generate practice questions", prompt: "Create practice problems based on my lecture notes."),
-        S(id: "explain", symbol: "book", title: "Explain a concept", prompt: "Teach me a difficult topic step by step."),
-        S(id: "weak", symbol: "chart.line.uptrend.xyaxis", title: "Review my weaknesses", prompt: "Analyze my performance and help me improve."),
-        S(id: "cram", symbol: "bolt", title: "Quick cram", prompt: "I have one hour to study. Help me prioritize."),
-        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", prompt: "Summarize my notes into the key points I should remember."),
+        S(id: "plan", symbol: "calendar", title: "Prepare for an exam", hint: "Guided: materials, topics, study map, template, practice"),
+        S(id: "practice", symbol: "checklist", title: "Generate practice questions", hint: "Make a practice set; saved questions are reused first"),
+        S(id: "explain", symbol: "book", title: "Explain a concept", hint: "Starts a chat about a concept in your course"),
+        S(id: "weak", symbol: "chart.line.uptrend.xyaxis", title: "Review my weaknesses", hint: "Practice the skills you’ve been missing, from your saved results"),
+        S(id: "cram", symbol: "bolt", title: "Quick cram", hint: "A timed practice set from your saved questions"),
+        S(id: "summary", symbol: "doc.text", title: "Summarize my notes", hint: "Starts a chat about summarizing your notes"),
     ]
+    private func run(_ s: S) {
+        let course = chat.app.courseList.first { $0.id == chat.app.selectedCourseID }?.name
+        switch s.id {
+        case "plan": chat.app.openExamPrep()
+        case "practice": chat.app.openNewPracticeSet()
+        case "weak": chat.app.reviewWeaknesses()
+        case "cram": chat.app.quickCram()
+        case "explain": chat.draft = "Explain a difficult concept from \(course ?? "my course") step by step: "
+        default: chat.draft = "Summarize my notes\(course.map { " for \($0)" } ?? "") into the key points I should remember."
+        }
+    }
     var body: some View {
         LazyVGrid(columns: [GridItem(.adaptive(minimum: 190), spacing: Theme.Space.sm)], spacing: Theme.Space.sm) {
             ForEach(Self.all) { s in
-                Button { chat.draft = s.prompt } label: {
+                Button { run(s) } label: {
                     HStack(spacing: 8) {
                         Image(systemName: s.symbol).foregroundStyle(Theme.accent).frame(width: 18)
                         Text(s.title).font(.system(.callout, design: .rounded, weight: .medium)).lineLimit(1)
                         Spacer(minLength: 0)
                     }.padding(.horizontal, 14).frame(height: 38).frame(maxWidth: .infinity, alignment: .leading)
                     .background(Theme.surface, in: Capsule()).overlay(Capsule().strokeBorder(Theme.border)).contentShape(Capsule())
-                }.buttonStyle(.plain).help(s.prompt).accessibilityLabel(s.title).accessibilityHint("Fills the message box so you can edit it before sending")
+                }.buttonStyle(.plain).help(s.hint).accessibilityLabel(s.title).accessibilityHint(s.hint)
             }
         }
     }

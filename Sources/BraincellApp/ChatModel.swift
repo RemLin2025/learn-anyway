@@ -136,9 +136,9 @@ final class ChatModel: ObservableObject {
             if let p = chip.planId { startPlanDay(planId: p, dayIndex: chip.dayIndex ?? 0) }
             else if let id = chip.courseId { app.practiceSetup = PracticeSetupRequest(courseId: id, assessmentId: chip.assessmentId) }
         case "prepareExam":
-            // Resume or regenerate: the job is idempotent, so this continues from the saved stage and skips finished work.
-            let c = app.courseList.first { $0.id == chip.courseId }?.name ?? "my course", a = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
-            draft = "Prepare \(a ?? "my exam") in \(c)."; send()
+            // Opens the same guided workflow (and resumes the saved job): the chat never re-implements the stages.
+            let name = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
+            app.openExamPrep(courseId: chip.courseId, assessment: name)
         case "startReviews": app.startReviews()
         case "resumeSession": if let s = app.resumableSession { app.activeSessionID = s.id } else { app.alertMessage = "There is no unfinished session to resume." }
         case "openPlan": if let p = chip.planId, let conv = try? store.plan(p)?.conversationId { open(conv) }

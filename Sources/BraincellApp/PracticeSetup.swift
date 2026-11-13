@@ -1,7 +1,7 @@
 import SwiftUI
 import BraincellCore
 
-struct PracticeSetupRequest: Identifiable { let id = UUID(); var courseId: UUID; var assessmentId: UUID? = nil; var skillIds: Set<UUID> = [] }
+struct PracticeSetupRequest: Identifiable { let id = UUID(); var courseId: UUID; var assessmentId: UUID? = nil; var skillIds: Set<UUID> = []; var cram = false }
 
 /// Choose what to practise: course/assessment, topics, count, difficulty, question types and mode. Study priority only changes how
 /// questions are spread across topics; it is never presented as the real exam split.
@@ -60,7 +60,7 @@ struct PracticeSetupSheet: View {
             HStack { Spacer(); Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction); Button("Start") { start() }.buttonStyle(.primary).keyboardShortcut(.defaultAction).disabled(matching == 0 || (kind == .topic && topics.isEmpty)) }
         }
         .padding(Theme.Space.xl).frame(width: 600, height: 560).background(Theme.background)
-        .onAppear { assessmentId = request.assessmentId; topics = request.skillIds; if !request.skillIds.isEmpty { kind = .topic }; load() }
+        .onAppear { assessmentId = request.assessmentId; topics = request.skillIds; if !request.skillIds.isEmpty { kind = .topic }; if request.cram { kind = .exam; timed = true; count = 15 }; load() }
         .onChange(of: assessmentId) { _, _ in load() }
         .onChange(of: kind) { _, _ in load() }
     }

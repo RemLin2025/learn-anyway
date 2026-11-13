@@ -62,3 +62,18 @@ extension AgentTests {
         #expect(try co.materials(courseId: c.id, job: analyzed).analysisStale)
     }
 }
+
+extension AgentTests {
+    @Test func chatLaunchesTheSameWorkflowWithoutAnyModelCallOrDuplicateJob() async throws {
+        let (e, c) = try await guidedEnv()
+        let out1 = try await self.run("exam.workflow", ["course": "STOR435", "assessment": "Midterm 3"], e)
+        #expect(out1.chips.contains { $0.action == "prepareExam" && $0.courseId == c.id } && e.script.count == 0)
+        let out2 = try await self.run("exam.workflow", ["course": "STOR435", "assessment": "midterm 3"], e)
+        #expect(out2.summary == "Opened preparation")
+        #expect(try ExamPrepCoordinator(e.ctx).jobs(courseId: c.id).count == 1)                         // the app wizard and chat share one job
+        let co = ExamPrepCoordinator(e.ctx)
+        #expect(co.existingJob(courseId: c.id, assessmentName: "Midterm 3") != nil)
+        let j = try await co.analyze(try #require(try co.jobs(courseId: c.id).first).id)                 // the wizard continues the job chat opened
+        #expect(j.state.topicCount == 3)
+    }
+}

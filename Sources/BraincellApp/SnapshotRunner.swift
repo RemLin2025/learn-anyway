@@ -126,7 +126,7 @@ enum SnapshotRunner {
         }
         model.reload(); model.selection = .home; chat.newChat()
         await shotWin("chat-1-empty")
-        chat.draft = SuggestionGrid.all[0].prompt
+        chat.draft = "Explain a difficult concept from my course step by step: "
         await shotWin("chat-2-suggestion-in-composer", wait: 400_000_000)
         chat.draft = "Help me prepare for my COMP301 Midterm 2 next Friday. I want a study plan and practice problems."
         chat.send()
@@ -318,6 +318,14 @@ enum SnapshotRunner {
         model.selection = .library
         for s in [LibrarySection.all, .materials, .questions, .practiceSets, .templates] { model.librarySection = s; await shot("u-\(s.rawValue.replacingOccurrences(of: " ", with: ""))") }
         if let c = model.courseList.first { model.selectedCourseID = c.id; model.selection = .courses; try? await Task.sleep(nanoseconds: 1_500_000_000); model.courseTabRequest = "practice"; await shot("u-coursePractice") }
+        model.selection = .home; model.selectedCourseID = model.courseList.first?.id
+        model.openExamPrep(courseId: model.courseList.first?.id, assessment: "Midterm 2")
+        try? await Task.sleep(nanoseconds: 2_000_000_000)
+        if let w = NSApp.windows.first(where: { $0.isVisible && $0.attachedSheet != nil }), let sv = w.attachedSheet?.contentView, let rep = sv.bitmapImageRepForCachingDisplay(in: sv.bounds) {
+            sv.cacheDisplay(in: sv.bounds, to: rep); try? rep.representation(using: .png, properties: [:])?.write(to: dir.appendingPathComponent("u-prepWizard.png"))
+        }
+        model.prepRequest = nil
+        model.selection = .home; await shot("u-home")
     }
 
     /// Post-submission review screens: a wrong and a right answer on a question with per-option explanations (multiline code option included), an old

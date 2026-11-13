@@ -16,6 +16,12 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
         public var analysisStale: Bool
     }
 
+    /// The given conversation if it still exists, otherwise a new one (study maps are saved against a conversation).
+    func liveConversation(_ id: UUID?, course: Course) throws -> UUID {
+        if let id, (try? c.store.conversation(id)) != nil { return id }
+        return try c.store.createConversation(courseId: course.id).id
+    }
+
     public func jobs(courseId: UUID) throws -> [StudyPrepJob] { try StudyPrep.jobs(courseId: courseId, c.db) }
     public func job(_ id: UUID) throws -> StudyPrepJob? { try c.db.read { try StudyPrepJob.fetchOne($0, key: id) } }
 
@@ -32,7 +38,7 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
             }
         }
         if let e = try jobs(courseId: course.id).first(where: { $0.assessmentId == asm?.id && $0.status != .cancelled }) { return e }
-        let conv = try conversationId ?? c.store.createConversation(courseId: course.id).id      // study maps are saved against a conversation, so the work also appears in chat history
+        let conv = try liveConversation(conversationId, course: course)      // study maps are saved against a conversation, so the work also appears in chat history
         var j = StudyPrepJob(id: UUID(), conversationId: conv, courseId: course.id, assessmentId: asm?.id, stage: .created, status: .paused, stateJSON: "{}", error: nil, createdAt: c.now(), updatedAt: c.now())
         try StudyPrep.save(&j, PrepState(), c)
         return j
@@ -52,7 +58,7 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
     public func analyze(_ jobId: UUID, stage: @escaping @Sendable (String) -> Void = { _ in }) async throws -> StudyPrepJob {
         guard let j = try job(jobId), let course = try c.courses.courses(includeArchived: true).first(where: { $0.id == j.courseId }) else { throw ToolError.unavailable("That preparation no longer exists.") }
         let name = try j.assessmentId.flatMap { id in try c.courses.assessments(courseId: course.id).first { $0.id == id }?.name }
-        _ = try await StudyPrep.run(course: course, assessmentName: name, analysisOnly: true, conversationId: try j.conversationId ?? c.store.createConversation(courseId: course.id).id, c, stage: stage)
+        _ = try await StudyPrep.run(course: course, assessmentName: name, analysisOnly: true, conversationId: try liveConversation(j.conversationId, course: course), c, stage: stage)
         return try job(jobId) ?? j
     }
 
@@ -76,7 +82,22 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
         return skills.filter { keep.contains(AgentContext.norm($0.name)) }.map(\.id)
     }
 
-    public struct Plan: Sendable, Equatable { public var set: PracticeSet; public var reused: Int; public var missing: Int }
+    public struct Plan: Sendable, Equatable {
+        public var set: PracticeSet; public var reused: Int; public var missing: Int
+        public init(set: PracticeSet, reused: Int, missing: Int) { self.set = set; self.reused = reused; self.missing = missing }
+    }
+
+    /// The plan already saved on the job (after a restart), recomputed from the set's real items.
+    public func currentPlan(_ id: UUID) -> Plan? {
+        guard let j = try? job(id), let sid = j.state.setId, let set = try? c.practiceSets.practiceSet(sid), set.deletedAt == nil, let items = try? c.practiceSets.items(setId: sid) else { return nil }
+        return Plan(set: set, reused: items.filter { $0.origin == "reused" }.count, missing: items.filter { $0.questionId == nil }.count)
+    }
+
+    /// The saved job for a course + assessment name, if there is one.
+    public func existingJob(courseId: UUID, assessmentName: String) -> StudyPrepJob? {
+        guard let asm = try? c.courses.assessments(courseId: courseId).first(where: { AgentContext.norm($0.name) == AgentContext.norm(assessmentName) }) else { return nil }
+        return (try? jobs(courseId: courseId))?.first { $0.assessmentId == asm.id && $0.status != .cancelled }
+    }
 
     /// Stage 6: how many saved questions fit and how many would be generated. Creates (or replaces) the planned set but calls no model.
     @discardableResult

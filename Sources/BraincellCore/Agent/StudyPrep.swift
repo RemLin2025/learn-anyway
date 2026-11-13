@@ -284,6 +284,17 @@ public enum StudyPrep {
 
 extension AgentRegistry {
     static let prepTools: [ToolSpec] = [
+        ToolSpec(name: "exam.workflow", summary: "Open the guided exam-preparation workflow for a course and assessment, prefilled. It walks the learner through materials, topic analysis, study-map review, template, practice settings and reuse-first generation, saving progress at every step. Use this for any request to prepare for an exam; do not run those steps yourself. Call it once.",
+                 params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "e.g. Midterm 3", required: true)], permission: .write, approval: false,
+                 describe: { a, _ in "Open exam preparation for \(a.string("assessment") ?? "the exam")" },
+                 run: { a, c, info in
+                     let course = try c.course(try a.require("course"))
+                     let job = try ExamPrepCoordinator(c).start(course: course, assessmentName: try a.require("assessment"), conversationId: info.conversationId)
+                     let s = job.state, name = try a.require("assessment")
+                     let where_ = s.setId != nil ? "a practice set is already planned" : s.mapId != nil ? "a study map is saved with \(s.topicCount) topic(s)" : "nothing is analyzed yet"
+                     return ToolOutput(text: "The guided preparation for \(name) in \(course.name) is ready in the app (\(where_)). Tell the learner to continue with the “Open preparation” button; saved analysis is reused and nothing is generated until they approve it. Do not call more tools.",
+                                       summary: "Opened preparation", chips: [ActionChip(label: "Open preparation", action: "prepareExam", courseId: course.id, assessmentId: job.assessmentId)])
+                 }),
         ToolSpec(name: "exam.prepare", summary: "Do the WHOLE exam preparation in one call: find/create the assessment, check sources, identify topics with evidence-based priorities, generate and save practice questions. Resumes automatically if a previous run stopped. Use this instead of searching sources yourself. Call it once.",
                  params: [ToolParam("course", "string", "Course name or id", required: true), ToolParam("assessment", "string", "e.g. Midterm 3", required: true), ToolParam("regenerate", "boolean", "Make a new question set even if one exists")], permission: .write, approval: false,
                  describe: { a, _ in "Prepare \(a.string("assessment") ?? "the exam") in \(a.string("course") ?? "the course")" },

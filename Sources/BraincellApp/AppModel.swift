@@ -96,6 +96,8 @@ final class AppModel: ObservableObject {
     /// Set by chat's View Questions: the Question Bank opens filtered to this course, then clears it.
     @Published var questionBankCourse: UUID?
     @Published var librarySection: LibrarySection = .materials
+    @Published var prepRequest: PrepRequest?
+    @Published var newSetCourse: Course?
     @Published var librarySearchSeed: String?
     @Published var questionFocus: UUID?
     @Published var questionSearchSeed: String?
@@ -281,6 +283,28 @@ final class AppModel: ObservableObject {
             activeSessionID = r.session.id
             if !r.skipped.isEmpty { alertMessage = "\(r.skipped.count) question(s) aren’t part of \(template.name) and were left out of this session." }
         }
+    }
+
+    /// The guided exam-preparation workflow, optionally prefilled. Chat, Home and the course page all open this same sheet.
+    func openExamPrep(courseId: UUID? = nil, assessment: String? = nil) { prepRequest = PrepRequest(courseId: courseId ?? selectedCourseID, assessmentName: assessment) }
+
+    private var focusCourse: Course? { courseList.first { $0.id == selectedCourseID } ?? courseList.first }
+
+    /// Home launchers. Each opens a real feature; none sends a canned chat message, and none calls a model just to decide what to do.
+    func openNewPracticeSet() {
+        guard let c = focusCourse else { alertMessage = "Create a course first; practice sets belong to a course."; return }
+        newSetCourse = c
+    }
+    /// Skills with recent misses come from saved evidence (no model); they preselect topic practice.
+    func reviewWeaknesses() {
+        guard let c = focusCourse else { alertMessage = "Create a course first."; return }
+        let weak = ((try? history?.weakSpots(courseId: c.id)) ?? []).map(\.skill.id)
+        if weak.isEmpty { alertMessage = "No weak spots yet for \(c.name): they appear after a few graded answers with repeated misses. You can still practise by topic." ; practiceSetup = PracticeSetupRequest(courseId: c.id); return }
+        practiceSetup = PracticeSetupRequest(courseId: c.id, skillIds: Set(weak))
+    }
+    func quickCram() {
+        guard let c = focusCourse else { alertMessage = "Create a course first."; return }
+        practiceSetup = PracticeSetupRequest(courseId: c.id, cram: true)
     }
 
     /// Old Question Bank entry points land in the Library's Questions section (optionally filtered to one course).
