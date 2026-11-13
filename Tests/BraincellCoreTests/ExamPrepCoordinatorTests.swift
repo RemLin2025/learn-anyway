@@ -45,6 +45,7 @@ extension AgentTests {
         let replanned = try co.plan(job.id, count: 2)                                                   // changing the plan replaces the unused set
         #expect(replanned.set.id != plan.set.id)
         #expect(try e.ctx.practiceSets.sets(courseId: c.id).map(\.id) == [replanned.set.id])
+        #expect(try e.ctx.practiceSets.deletedSets(courseId: c.id).isEmpty)                              // a superseded plan is discarded, not parked in Recently Deleted
 
         let r = try await co.generate(job.id)
         let qn = try questionCount(e)

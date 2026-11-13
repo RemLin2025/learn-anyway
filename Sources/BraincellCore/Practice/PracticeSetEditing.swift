@@ -104,6 +104,23 @@ extension PracticeSetService {
         }
     }
 
+    /// Removes a set that was only ever a plan (no attempt, never opened by the learner), e.g. the previous plan when the wizard settings change. Not recoverable and not listed
+    /// in Recently Deleted, because the learner never saw it as a set. Refuses (returns false) if any attempt exists.
+    @discardableResult
+    public func discardUnused(setId: UUID) throws -> Bool {
+        guard try progress(setId: setId).state == .notStarted else { return false }
+        try db.write { try $0.execute(sql: "DELETE FROM practice_sets WHERE id = ?", arguments: [setId]) }
+        return true
+    }
+
+    /// A set title that doesn't collide with a live set in the course ("Midterm 3 practice", then "Midterm 3 practice (2)").
+    public func uniqueTitle(_ base: String, courseId: UUID, excluding setId: UUID? = nil) throws -> String {
+        let taken = Set(try sets(courseId: courseId).filter { $0.id != setId }.map(\.title))
+        if !taken.contains(base) { return base }
+        var n = 2; while taken.contains("\(base) (\(n))") { n += 1 }
+        return "\(base) (\(n))"
+    }
+
     /// Soft delete: the set disappears from lists but can be restored; its questions and every past attempt are untouched.
     public func delete(setId: UUID) throws { try db.write { try $0.execute(sql: "UPDATE practice_sets SET deletedAt = ? WHERE id = ?", arguments: [Date(), setId]) } }
     public func restore(setId: UUID) throws { try db.write { try $0.execute(sql: "UPDATE practice_sets SET deletedAt = NULL WHERE id = ?", arguments: [setId]) } }

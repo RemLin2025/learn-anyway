@@ -111,13 +111,13 @@ public final class ExamPrepCoordinator: @unchecked Sendable {
         var params = GenerationParams(count: max(1, min(count, 60)), types: types, minDifficulty: minDifficulty, maxDifficulty: maxDifficulty, skillIds: skills, documentIds: [], mode: .matchInstructorStyle)
         params.notes = "Exam preparation questions for \(j.assessmentId.map { _ in "the assessment" } ?? "the course"). Generated practice, not the real exam."
         // A changed plan replaces the unused set from the previous plan; a set that already has attempts is never touched.
-        if let old = j.state.setId, (try c.practiceSets.progress(setId: old)).state == .notStarted { try c.practiceSets.delete(setId: old) }
+        if let old = j.state.setId { _ = try c.practiceSets.discardUnused(setId: old) }
         let p = try c.practiceSets.prepare(courseId: j.courseId, assessmentId: j.assessmentId, params: params, fresh: fresh, requestKey: requestKey, topicReuse: topicReuse)
         if let t = j.state.templateId { try c.practiceSets.update(setId: p.set.id, templateId: t) }
-        // Name the set after the exam so it can be found in the Library and on the Practice tab ("Midterm 3 practice · 10 questions").
+        // Name the set after the exam so it can be found in the Library and on the Practice tab ("Midterm 3 practice"). No question count in the title: it would go stale after edits.
         var named = p.set
         if let aid = j.assessmentId, let an = try c.courses.assessments(courseId: j.courseId).first(where: { $0.id == aid })?.name {
-            let title = "\(an) practice · \(params.count) questions"
+            let title = try c.practiceSets.uniqueTitle("\(an) practice", courseId: j.courseId, excluding: p.set.id)
             try c.practiceSets.update(setId: p.set.id, title: title); named.title = title
         }
         _ = try mutate(id) { $0.params = params; $0.setId = p.set.id; $0.wizardStep = "create" }

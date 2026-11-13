@@ -176,7 +176,7 @@ struct NotesSummarySheet: View {
             HStack {
                 Text(chosen.isEmpty ? "Nothing selected" : "\(need) to summarize · \(reuse) already saved").font(.caption).foregroundStyle(Theme.textSecondary)
                 Spacer()
-                Button { run() } label: { Label(need == 0 ? "Open saved" : "Summarize \(need)", systemImage: "sparkles") }.buttonStyle(.primary).disabled(chosen.isEmpty || busy)
+                Button { run() } label: { Label(chosen.isEmpty ? "Summarize" : (need == 0 ? "Open saved" : "Summarize \(need)"), systemImage: "sparkles") }.buttonStyle(.primary).disabled(chosen.isEmpty || busy)
             }
             if busy { HStack(spacing: 8) { ProgressView().controlSize(.small); Text(status).foregroundStyle(Theme.textSecondary) } }
             if let r = report { Text("\(r.generated) new summar\(r.generated == 1 ? "y" : "ies"), \(r.reused) reused, \(r.modelCalls) model call\(r.modelCalls == 1 ? "" : "s")." + (r.failed.isEmpty ? "" : " Not summarized: " + r.failed.joined(separator: "; "))).font(.caption).foregroundStyle(r.failed.isEmpty ? Theme.textSecondary : Theme.attention) }

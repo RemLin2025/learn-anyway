@@ -29,7 +29,7 @@ extension AgentTests {
         let other = try co.start(course: c, assessmentName: "Midterm 4")
         let n = try #require(try co.job(job.id)?.state.params?.count)
         let plan = try co.plan(other.id, count: n)
-        #expect(plan.reused > 0 && plan.reused + plan.missing == n && plan.set.title == "Midterm 4 practice · \(n) questions")
+        #expect(plan.reused > 0 && plan.reused + plan.missing == n && plan.set.title == "Midterm 4 practice")
     }
 
     @Test func unfinishedPreparationSurvivesQuittingAndReopening() async throws {

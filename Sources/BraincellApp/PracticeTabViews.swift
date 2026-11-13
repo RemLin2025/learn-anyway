@@ -106,8 +106,8 @@ struct CoursePracticeTab: View {
                 SegmentedControl(selection: $filter, options: Filter.allCases) { $0.rawValue }
                 Spacer()
                 if !deleted.isEmpty { Button { showDeleted.toggle() } label: { Label("Recently deleted (\(deleted.count))", systemImage: "trash") }.buttonStyle(.borderless) }
-                Button { model.librarySection = .templates; model.selection = .library } label: { Label("Templates", systemImage: "rectangle.3.group") }.buttonStyle(.secondary)
-                Button { showNew = true } label: { Label("New Practice Set", systemImage: "plus") }.buttonStyle(.primary)
+                Button { model.librarySection = .templates; model.selection = .library } label: { Label("Templates", systemImage: "rectangle.3.group").lineLimit(1).fixedSize() }.buttonStyle(.secondary)
+                Button { showNew = true } label: { Label("New Practice Set", systemImage: "plus").lineLimit(1).fixedSize() }.buttonStyle(.primary)
             }
             if showDeleted {
                 VStack(alignment: .leading, spacing: 4) {

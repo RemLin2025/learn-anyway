@@ -79,3 +79,16 @@ extension AgentTests {
         #expect(q.reused == 0 && q.topicOnly == 0 && q.missing == 2)
     }
 }
+
+extension AgentTests {
+    @Test func discardedPlansLeaveNoTraceButStartedSetsAreNeverDiscardedAndTitlesStayUnique() async throws {
+        let (e, c, co, j) = try await reuseEnv()
+        let svc = e.ctx.practiceSets
+        let a = try co.plan(j.id, count: 6, requestKey: "a")
+        let started = try svc.startSession(setId: a.set.id, template: .interactive, templates: TemplateService(db: e.db))
+        #expect(try svc.discardUnused(setId: a.set.id) == false && (try svc.practiceSet(a.set.id)) != nil && started.session.id == (try svc.progress(setId: a.set.id).sessionId))   // has an attempt: refused
+        let b = try co.plan(j.id, count: 5, requestKey: "b")
+        #expect(b.set.title != a.set.title && b.set.title.hasPrefix("Midterm 4 practice"))
+        #expect(try svc.discardUnused(setId: b.set.id) && (try svc.practiceSet(b.set.id)) == nil && (try svc.deletedSets(courseId: c.id)).isEmpty)
+    }
+}

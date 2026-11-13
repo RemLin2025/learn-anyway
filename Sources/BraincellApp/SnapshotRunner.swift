@@ -1,4 +1,5 @@
 import SwiftUI
+import GRDB
 import PDFKit
 import CoreText
 import AppKit
@@ -398,7 +399,7 @@ enum SnapshotRunner {
         // Reuse: a second assessment reuses saved questions.
         if let co = model.chat.map({ ExamPrepCoordinator($0.ctx) }), let j = try? co.start(course: course, assessmentName: "Midterm 4"), let plan = try? co.plan(j.id, count: 4) {
             check("existing questions are reused before generating", plan.reused > 0, "same-shape plan: reused \(plan.reused), to generate \(plan.missing)")
-            if let p3 = try? co.plan(j.id, count: 3) { note("INFO a 3-question plan has different topic/archetype slots: reused \(p3.reused), to generate \(p3.missing) (reuse never takes loosely related questions)") }
+            if let p3 = try? co.plan(j.id, count: 3) { note("INFO a 3-question plan: reused \(p3.reused) (\(p3.topicOnly) by topic only), to generate \(p3.missing)") }
         } else { check("reuse plan", false) }
         // Source change invalidates only the analysis.
         let f = dir.appendingPathComponent("extra-notes.txt"); try? "Bootstrap resampling estimates the sampling distribution.".write(to: f, atomically: true, encoding: .utf8); _ = try? docs.importFile(at: f, courseId: course.id)
@@ -431,6 +432,14 @@ enum SnapshotRunner {
         }
         await shot("07-summaries", sheet: true)
         model.summaryRequest = nil
+        // The existing AI Gateway's usage records must match what the mock server actually received (each mock reply reports 100 input + 100 output tokens).
+        if let db = model.db {
+            let rows = (try? db.read { try Row.fetchAll($0, sql: "SELECT task, status, inputTokens, outputTokens FROM ai_requests") }) ?? []
+            let ok = rows.filter { ($0["status"] as String) == "success" }
+            let total = calls("topics") + calls("questions") + calls("summary") + calls("chat")
+            let tin = ok.reduce(0) { $0 + (($1["inputTokens"] as Int?) ?? 0) }, tout = ok.reduce(0) { $0 + (($1["outputTokens"] as Int?) ?? 0) }
+            check("gateway usage log matches the requests the server received", ok.count == total && tin == 100 * total && tout == 100 * total, "recorded \(ok.count) successful requests (\(tin) in / \(tout) out tokens) vs \(total) received; tasks \(Dictionary(grouping: ok, by: { $0["task"] as String }).mapValues(\.count))")
+        }
     }
 
     /// Universal Library and course Practice tab screenshots on the demo workspace. Only with BRAINCELL_UNI_SNAP and a throwaway BRAINCELL_DATA_DIR.
@@ -438,6 +447,7 @@ enum SnapshotRunner {
         guard ProcessInfo.processInfo.environment["BRAINCELL_DATA_DIR"] != nil else { return }
         model.loadDemo()
         func shot(_ name: String) async {
+            if let sz = ProcessInfo.processInfo.environment["BRAINCELL_SNAP_SIZE"]?.split(separator: "x").compactMap({ Double($0) }), sz.count == 2, let w = NSApp.windows.first(where: { $0.isVisible && $0.attachedSheet == nil }) { w.setContentSize(NSSize(width: sz[0], height: sz[1])) }     // resize check
             try? await Task.sleep(nanoseconds: 1_800_000_000)
             guard let v = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView, let rep = v.bitmapImageRepForCachingDisplay(in: v.bounds) else { return }
             v.cacheDisplay(in: v.bounds, to: rep)
@@ -679,6 +689,37 @@ enum SnapshotRunner {
             walk(root, 0)
             log.append("AX \(item.rawValue): \(roles.values.reduce(0, +)) elements; unlabeled controls: \(unlabeled.count)")
             for u in unlabeled { log.append("    · " + u) }
+        }
+        // Universal Library sections, the course Practice tab and the new sheets: every control must expose a label to VoiceOver.
+        func auditRoot(_ name: String, _ root: NSView?) {
+            guard let root else { log.append("AX \(name): not on screen"); return }
+            var n = 0, unl: [String] = []
+            func has(_ a: NSAccessibilityProtocol) -> Bool { [a.accessibilityLabel(), a.accessibilityTitle(), a.accessibilityHelp(), a.accessibilityValue() as? String].compactMap { $0 }.contains { !$0.isEmpty } }
+            func descendants(_ a: NSAccessibilityProtocol, _ d: Int = 0) -> Bool { d <= 4 && (a.accessibilityChildren() ?? []).contains { ($0 as? NSAccessibilityProtocol).map { has($0) || descendants($0, d + 1) } ?? false } }
+            func walk(_ el: Any, _ d: Int) {
+                guard d < 80, let a = el as? NSAccessibilityProtocol else { return }
+                n += 1
+                let role = a.accessibilityRole()?.rawValue ?? ""
+                if ["AXButton", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXTextField", "AXTextArea", "AXMenuButton", "AXStepper", "AXSlider"].contains(role), !has(a), !descendants(a), a.accessibilityFrame().width > 1 {
+                    let f = a.accessibilityFrame(); unl.append("\(role) at (\(Int(f.minX)),\(Int(f.minY)) \(Int(f.width))×\(Int(f.height)))")
+                }
+                for c in a.accessibilityChildren() ?? [] { walk(c, d + 1) }
+            }
+            walk(root, 0)
+            log.append("AX \(name): \(n) elements; unlabeled controls: \(unl.count)"); for u in unl { log.append("    · " + u) }
+        }
+        model.loadDemo()
+        for sec in LibrarySection.allCases {
+            model.selection = .library; model.librarySection = sec; try? await Task.sleep(nanoseconds: 1_500_000_000)
+            auditRoot("Library › \(sec.rawValue)", NSApp.windows.first(where: { $0.isVisible })?.contentView)
+        }
+        if let c = model.courseList.first {
+            model.selectedCourseID = c.id; model.selection = .courses; try? await Task.sleep(nanoseconds: 1_200_000_000); model.courseTabRequest = "practice"; try? await Task.sleep(nanoseconds: 1_500_000_000)
+            auditRoot("Course › Practice", NSApp.windows.first(where: { $0.isVisible })?.contentView)
+            model.openExamPrep(courseId: c.id, assessment: "Midterm 2"); try? await Task.sleep(nanoseconds: 1_800_000_000)
+            auditRoot("Prepare for an exam (wizard)", NSApp.windows.first(where: { $0.attachedSheet != nil })?.attachedSheet?.contentView); model.prepRequest = nil; try? await Task.sleep(nanoseconds: 600_000_000)
+            model.openSummaries(courseId: c.id); try? await Task.sleep(nanoseconds: 1_800_000_000)
+            auditRoot("Summarize notes (sheet)", NSApp.windows.first(where: { $0.attachedSheet != nil })?.attachedSheet?.contentView); model.summaryRequest = nil; try? await Task.sleep(nanoseconds: 600_000_000)
         }
         // Practice screens, one per question type.
         if let c = model.courseList.first, let ids = try? model.practice?.questionIds(courseId: c.id), !ids.isEmpty {
