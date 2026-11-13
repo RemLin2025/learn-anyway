@@ -294,7 +294,7 @@ struct TopicsTab: View {
                 Spacer()
                 Button { model.practiceSetup = PracticeSetupRequest(courseId: course.id, assessmentId: assessmentId) } label: { Label("Practice", systemImage: "play.fill") }.buttonStyle(.primary).disabled(rows.allSatisfy { $0.questionCount == 0 })
                 Button("Style profile") { showProfile = true }.help("What was detected about the instructor's question style, with confidence and limitations")
-                Button("Analyze with Chat") { model.chat?.analyzeTopics(course: course, assessment: assessments.first { $0.id == assessmentId }) }.help("Re-run topic analysis and question generation in Chat. Your edits are kept; new topics are added.")
+                Button("Prepare for an exam") { model.chat?.analyzeTopics(course: course, assessment: assessments.first { $0.id == assessmentId }) }.help("Choose materials, review the study map and generate exam-style practice.")
             }.padding([.horizontal, .top], 16)
             HStack {
                 TextField("Add a topic", text: $name).onSubmit(add).accessibilityLabel("New topic name")

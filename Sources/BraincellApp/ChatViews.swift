@@ -43,6 +43,7 @@ struct ChatWorkspace: View {
                 .foregroundStyle(Theme.textSecondary).help(showPanel ? "Hide conversations" : "Show conversations").accessibilityLabel(showPanel ? "Hide conversations" : "Show conversations")
             Text(chat.isEmpty ? "New chat" : (chat.currentId.flatMap { id in chat.conversations.first { $0.id == id }?.title } ?? "Chat")).font(.system(.headline, design: .rounded, weight: .semibold)).lineLimit(1)
             Spacer()
+            Button("Prepare for an exam") { model.examAssessmentId = nil; model.showExamPreparation = true }.disabled(chat.thinking)
             if !showPanel { Button { chat.newChat() } label: { Label("New chat", systemImage: "square.and.pencil").labelStyle(.iconOnly).frame(width: 32, height: 32).contentShape(Rectangle()) }.buttonStyle(.plain).foregroundStyle(Theme.textSecondary).help("New chat").accessibilityLabel("New chat") }
         }.padding(.horizontal, Theme.Space.lg).padding(.vertical, Theme.Space.sm).frame(minHeight: 48)
             .overlay(alignment: .bottom) { Rectangle().fill(Theme.border).frame(height: 1) }

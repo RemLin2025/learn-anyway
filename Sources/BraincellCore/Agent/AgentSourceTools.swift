@@ -128,8 +128,9 @@ extension AgentRegistry {
     static func resolveRef(_ raw: Any?, docs: [Document], chunks: (UUID) -> [DocumentChunk]) -> (StudyMapDocument.SourceRef?, String?) {
         guard let o = raw as? [String: Any], let ref = (o["document"] as? String) ?? (o["documentId"] as? String) else { return (nil, "a source needs a document") }
         let n = AgentContext.norm(ref)
-        let d = docs.first { $0.id.uuidString.lowercased() == ref.lowercased() } ?? docs.first { AgentContext.norm($0.name) == n } ?? docs.first { AgentContext.norm($0.title) == n }
-        guard let d else { return (nil, "“\(ref)” isn’t a document of this course") }
+        let exactId = docs.first { $0.id.uuidString.lowercased() == ref.lowercased() }
+        let matches = docs.filter { AgentContext.norm($0.name) == n || AgentContext.norm($0.title) == n }
+        guard let d = exactId ?? (matches.count == 1 ? matches.first : nil) else { return (nil, "“\(ref)” is unavailable or ambiguous among the selected documents") }
         let page = (o["page"] as? Int) ?? (o["page"] as? Double).map(Int.init) ?? (o["page"] as? String).flatMap(Int.init)
         if let page {
             let ok = (d.pageCount.map { (1...max(1, $0)).contains(page) } ?? false) || chunks(d.id).contains { $0.pageNumber == page && !$0.isLowContent }
@@ -144,7 +145,8 @@ extension AgentRegistry {
     @Sendable static func createMap(_ a: ToolArgs, _ c: AgentContext, _ info: ToolRunInfo) async throws -> ToolOutput {
         let course = try c.course(try a.require("course")); let asm = try c.assessment(a.string("assessment"), in: course)
         let title = try a.require("title")
-        let docs = try c.docs.documents(courseId: course.id)
+        let ids = a.strings("documentIds").compactMap(UUID.init(uuidString:))
+        let docs = try ids.isEmpty ? c.docs.documents(courseId: course.id) : StudyPrep.selectedDocuments(ids, c)
         guard docs.contains(where: { readableKinds($0.kind) && $0.extractionStatus != .failed }) else {
             throw ToolError.unavailable("\(course.name) has no readable material, so a source-grounded map can’t be built. Ask the learner to add text-based files first.")
         }
@@ -193,9 +195,11 @@ extension AgentRegistry {
                                    research: .init(status: "unavailable", note: a2 ? "Research entries were rejected: this build has no web search or fetch tool, so no external sources were consulted." : "No web search or fetch tool exists in this build, so no external research was done. Scope comes from the course material only."),
                                    warnings: warnings, coverageGaps: gaps)
         let now = c.now()
-        let rec = StudyMapRecord(id: UUID(), conversationId: info.conversationId, courseId: course.id, assessmentId: asm?.id, title: title, mapJSON: String(data: try JSONEncoder().encode(doc), encoding: .utf8) ?? "{}", createdAt: now, updatedAt: now)
+        // Native workspaces use a stable operation ID without creating an empty chat.
+        let conversationId = try c.store.conversation(info.conversationId)?.id
+        let rec = StudyMapRecord(id: UUID(), conversationId: conversationId, courseId: course.id, assessmentId: asm?.id, title: title, mapJSON: String(data: try JSONEncoder().encode(doc), encoding: .utf8) ?? "{}", createdAt: now, updatedAt: now)
         try c.store.saveMap(rec)
-        let saved = try c.store.maps(courseId: course.id, conversationId: info.conversationId).first { $0.title == title } ?? rec
+        let saved = try c.store.maps(courseId: course.id, conversationId: conversationId).first { $0.title == title && $0.conversationId == conversationId } ?? rec
         let unsourced = topics.filter { !$0.sourced }.count, inst = topics.filter { $0.importance.source == .instructor }.count, est = topics.filter { $0.importance.source == .estimated }.count
         var text: String = "Saved study map “\(title)”: \(topics.count) topic(s) (\(inst) with instructor-stated importance, \(est) AI-estimated, \(topics.count - inst - est) unknown"
         if unsourced > 0 { text += ", \(unsourced) unsourced" }

@@ -813,6 +813,12 @@ public final class AppDatabase: Sendable {
                 t.column("maxScore", .double)
             }
         }
+        m.registerMigration("v18_exam_workspace") { db in
+            try db.create(table: "exam_workspaces") { t in
+                t.primaryKey("assessmentId", .blob).references("assessments", onDelete: .cascade)
+                t.column("payload", .text).notNull()
+            }
+        }
         return m
     }
 

@@ -57,6 +57,7 @@ extension AgentTests {
         let again = try await prep(e, c)
         #expect(try e.script.count == calls && questionCount(e) == qs && again.text.contains("Already prepared"))
         #expect(try e.ctx.courses.assessments(courseId: c.id).count == 1 && (try StudyPrep.jobs(courseId: c.id, e.db).count) == 1)
+        #expect(try StudyPrep.jobs(courseId: c.id, e.db).first?.status == .completed)
     }
 
     @Test func changedSourceIsDetectedAndOnlyThenReanalyzed() async throws {
@@ -112,19 +113,106 @@ extension AgentTests {
         _ = e
     }
 
-    @Test func chatCallsExamPrepareOnceAndStopsWithoutRepeatedSearches() async throws {
+    @Test func chatOffersPreparationWorkspaceWithoutBypassingReview() async throws {
         let box = LockedBox<Int>(0)
         let e = try await env { _, user, _ in
             if user.contains("You analyze course material") { return Self.topicsJSON }
             if user.contains("req-") { return Fx.envelope(self.requestId(user), Array(Fx.all.prefix(3))) }
-            return box.withLock { $0 += 1; return $0 } == 1 ? self.call("exam.prepare", ["course": "STOR435", "assessment": "Midterm 3"]) : "Your Midterm 3 preparation is ready."
+            return box.withLock { $0 += 1; return $0 } == 1 ? self.call("exam.prepare", ["course": "STOR435", "assessment": "Midterm 3"]) : "Open Prepare for an exam to review your materials."
         }
         let c = try e.ctx.courses.createCourse(name: "STOR435")
         let d = try insertDoc(e, c, name: "outline.pdf", status: .ok, pages: 5)
         try insertChunk(e, d, 0, page: 1, "Chapter 2 is worth 40% of the exam grade."); try insertChunk(e, d, 1, page: 2, "Maximum likelihood example.")
         await ask(e, "Help me prepare for Midterm 3 in STOR435")
         let tools = try toolMessages(e)
-        #expect(tools.count == 1 && tools[0].content.contains("practice question"))
-        #expect(try msgs(e).last?.content == "Your Midterm 3 preparation is ready." && (try msgs(e).contains { $0.kind == .actions && ($0.payload ?? "").contains("startPractice") }))
+        #expect(tools.count == 1 && tools[0].content.contains("No questions have been generated"))
+        #expect(try questionCount(e) == 0)
+        #expect(try msgs(e).last?.content == "Open Prepare for an exam to review your materials." && (try msgs(e).contains { $0.kind == .actions && ($0.payload ?? "").contains("prepareExam") }))
+    }
+}
+
+extension AgentTests {
+    @Test func reviewOnlySavesFindingsWithoutGeneratingOrApplyingTopics() async throws {
+        let (e, c) = try await prepEnv()
+        let docs = try e.ctx.docs.documents(courseId: c.id)
+        let a = try e.ctx.courses.addAssessment(courseId: c.id, name: "Midterm 3")
+        var w = ExamWorkspace(assessmentId: a.id)
+        w.materials = docs.map { ExamMaterial(id: $0.id) }; try w.save(e.db)
+        _ = try await StudyPrep.run(course: c, assessmentName: a.name, documentIds: docs.map(\.id), instructions: w.analysisInstructions, reviewOnly: true, conversationId: w.conversationId, e.ctx, stage: { _ in })
+        let job = try #require(try StudyPrep.jobs(courseId: c.id, e.db).first)
+        #expect(job.status == .paused && job.state.mapId != nil)
+        #expect(job.state.taskId == nil && e.script.count == 1)
+        #expect(try e.ctx.store.map(try #require(job.state.mapId))?.conversationId == nil)
+        #expect(try questionCount(e) == 0 && e.ctx.courses.skills(courseId: c.id).isEmpty)
+        w.proposal = try e.ctx.store.map(try #require(job.state.mapId))?.document
+        w.excluded = [2]
+        w.proposal?.topics[0].name = "Learner-edited estimation"
+        try w.approve(e.ctx, courseId: c.id)
+        let saved = try #require(try e.ctx.store.map(try #require(job.state.mapId))?.document)
+        #expect(saved.topics.count == 2 && saved.topics[0].name == "Learner-edited estimation")
+        #expect(try ExamWorkspace.load(assessmentId: a.id, e.db).approved)
+        _ = try await StudyPrep.run(course: c, assessmentName: a.name, documentIds: docs.map(\.id), instructions: w.analysisInstructions, questionCount: 3, conversationId: w.conversationId, e.ctx, stage: { _ in })
+        #expect(try StudyPrep.jobs(courseId: c.id, e.db).first?.status == .completed)
+        #expect(e.script.prompts.filter { $0.user.contains("You analyze course material") }.count == 1)
+    }
+
+    @Test func explicitSelectionCannotGenerateWithoutApproval() async throws {
+        let (e, c) = try await prepEnv()
+        let docs = try e.ctx.docs.documents(courseId: c.id)
+        let out = try await StudyPrep.run(course: c, assessmentName: "Midterm 3", documentIds: docs.map(\.id), conversationId: e.conv, e.ctx, stage: { _ in })
+        #expect(out.text.contains("approve") && e.script.count == 0)
+        #expect(try questionCount(e) == 0)
+    }
+
+    @Test func materialAssociationsAreSharedAndAssessmentSpecific() async throws {
+        let (e, c) = try await prepEnv()
+        let doc = try #require(try e.ctx.docs.documents(courseId: c.id).first)
+        let a = try e.ctx.courses.addAssessment(courseId: c.id, name: "Midterm 2")
+        let b = try e.ctx.courses.addAssessment(courseId: c.id, name: "Final")
+        var first = ExamWorkspace(assessmentId: a.id), second = ExamWorkspace(assessmentId: b.id)
+        first.materials = [ExamMaterial(id: doc.id)]; second.materials = first.materials
+        first.materials[0].relevance = .confirmed; first.materials[0].kind = .notes
+        try first.save(e.db); try second.save(e.db)
+        #expect(try e.ctx.docs.assessmentIds(documentId: doc.id) == [a.id, b.id])
+        #expect(try ExamWorkspace.load(assessmentId: a.id, e.db).materials[0].relevance == .confirmed)
+        first.materials = []; try first.save(e.db)
+        #expect(try e.ctx.docs.assessmentIds(documentId: doc.id) == [b.id])
+        #expect(try e.ctx.docs.documents(courseId: c.id).count == 1)
+    }
+
+    @Test func exhaustedTopicBudgetCanBeRetriedExplicitly() async throws {
+        let valid = LockedBox<Bool>(false)
+        let e = try await env { _, _, _ in valid.withLock { $0 } ? Self.topicsJSON : "invalid JSON" }
+        let c = try e.ctx.courses.createCourse(name: "STOR435")
+        let d = try insertDoc(e, c, name: "outline.pdf", status: .ok, pages: 1)
+        try insertChunk(e, d, 0, page: 1, "Chapter 2 is worth 40% of the exam grade.")
+        _ = try await StudyPrep.run(course: c, assessmentName: "Midterm 3", reviewOnly: true, conversationId: e.conv, e.ctx, stage: { _ in })
+        #expect(e.script.count == StudyPrep.maxRetriesPerStage + 1)
+        valid.withLock { $0 = true }
+        _ = try await StudyPrep.run(course: c, assessmentName: "Midterm 3", reviewOnly: true, conversationId: e.conv, e.ctx, stage: { _ in })
+        #expect(try StudyPrep.jobs(courseId: c.id, e.db).first?.state.mapId != nil)
+        #expect(e.script.count == StudyPrep.maxRetriesPerStage + 2)
+    }
+
+    @Test func missingSelectedDocumentPausesRatherThanLeavingRunningJob() async throws {
+        let (e, c) = try await prepEnv()
+        _ = try await StudyPrep.run(course: c, assessmentName: "Midterm 3", documentIds: [UUID()], reviewOnly: true, conversationId: e.conv, e.ctx, stage: { _ in })
+        let job = try #require(try StudyPrep.jobs(courseId: c.id, e.db).first)
+        #expect(job.status == .paused && job.error != nil && e.script.count == 0)
+    }
+}
+
+
+extension AgentTests {
+    @Test func ambiguousSourceNamesAreRejectedInsteadOfCitingTheWrongFile() async throws {
+        let (e, c) = try await prepEnv()
+        let other = try e.ctx.courses.createCourse(name: "OTHER")
+        _ = try insertDoc(e, other, name: "outline.pdf", status: .ok, pages: 5)
+        let docs = try StudyPrep.availableDocuments(e.ctx)
+        let (ref, warning) = AgentRegistry.resolveRef(["document": "outline.pdf", "page": 1], docs: docs, chunks: { (try? e.ctx.docs.chunks(documentId: $0)) ?? [] })
+        #expect(ref == nil && warning != nil)
+        let exact = try #require(try e.ctx.docs.documents(courseId: c.id).first)
+        let (idRef, _) = AgentRegistry.resolveRef(["document": exact.id.uuidString, "page": 1], docs: docs, chunks: { (try? e.ctx.docs.chunks(documentId: $0)) ?? [] })
+        #expect(idRef?.documentId == exact.id)
     }
 }

@@ -236,7 +236,9 @@ public struct AITaskService: Sendable {
             } else if plan != nil, b.kind == .continue { slots = Array(try GenerationPlanStore.unmet(d, taskId: task.id).prefix(b.expectedCount)) }
             var docsForExtract: [(title: String, chunks: [DocumentChunk])] = []
             for docId in params.documentIds {
-                guard let doc = try Document.fetchOne(d, key: docId), doc.courseId == task.courseId else { continue }
+                guard let doc = try Document.fetchOne(d, key: docId), doc.deletedAt == nil else { continue }
+                let linked = try task.assessmentId.map { a in try DocumentAssessment.filter(Column("documentId") == docId && Column("assessmentId") == a).fetchCount(d) > 0 } ?? false
+                guard doc.courseId == task.courseId || linked else { continue }
                 docsForExtract.append((doc.title, try DocumentChunk.filter(Column("documentId") == docId && Column("isLowContent") == false).order(Column("ordinal")).fetchAll(d)))
             }
             let selected = ExtractSelector.select(docsForExtract, queries: slots.map(\.topic) + skills + [assessment?.name ?? ""], budget: PromptBuilder.extractBudget)

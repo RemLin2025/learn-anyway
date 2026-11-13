@@ -52,6 +52,8 @@ final class AppModel: ObservableObject {
     lazy var aiConfig: AIConfig? = gateway.map { AIConfig(gateway: $0) }
     /// The Home chat. Built lazily so launch doesn't pay for it until Home is shown.
     lazy var chat: ChatModel? = { guard let db, let storage, let gateway else { return nil }; return ChatModel(app: self, ctx: AgentContext(db: db, storage: storage, gateway: gateway)) }()
+    @Published var showExamPreparation = false
+    @Published var examAssessmentId: UUID?
     @Published var selectedCourseID: UUID?
     /// Set to ask for confirmation before deleting this course (from the Courses page or a Library course folder).
     @Published var askDeleteCourse: UUID?

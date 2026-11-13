@@ -9,6 +9,9 @@ struct RootView: View {
                 VStack(spacing: 0) { FocusEndBanner(); PracticeView(sessionID: sid, app: model).id(sid) }
             } else { library }
         }
+        .sheet(isPresented: $model.showExamPreparation) {
+            if let ctx = model.chat?.ctx { ExamPreparationSheet(context: ctx, courseId: model.selectedCourseID ?? model.courseList.first?.id, assessmentId: model.examAssessmentId) }
+        }
         .sheet(item: $model.practiceSetup) { PracticeSetupSheet(request: $0) }
         .buttonStyle(.secondary)
         .textFieldStyle(AppFieldStyle())

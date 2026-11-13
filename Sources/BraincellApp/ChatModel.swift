@@ -135,9 +135,7 @@ final class ChatModel: ObservableObject {
             if let p = chip.planId { startPlanDay(planId: p, dayIndex: chip.dayIndex ?? 0) }
             else if let id = chip.courseId { app.practiceSetup = PracticeSetupRequest(courseId: id, assessmentId: chip.assessmentId) }
         case "prepareExam":
-            // Resume or regenerate: the job is idempotent, so this continues from the saved stage and skips finished work.
-            let c = app.courseList.first { $0.id == chip.courseId }?.name ?? "my course", a = (try? app.courses?.assessments(courseId: chip.courseId ?? UUID()))?.first { $0.id == chip.assessmentId }?.name
-            draft = "Prepare \(a ?? "my exam") in \(c)."; send()
+            app.selectedCourseID = chip.courseId; app.examAssessmentId = chip.assessmentId; app.showExamPreparation = true
         case "startReviews": app.startReviews()
         case "resumeSession": if let s = app.resumableSession { app.activeSessionID = s.id } else { app.alertMessage = "There is no unfinished session to resume." }
         case "openPlan": if let p = chip.planId, let conv = try? store.plan(p)?.conversationId { open(conv) }
@@ -145,10 +143,9 @@ final class ChatModel: ObservableObject {
         }
     }
 
-    /// Runs the saved-progress exam preparation in Home chat (topics + questions); finished work is reused.
+    /// Opens material selection and review before question generation.
     func analyzeTopics(course: Course, assessment: Assessment?) {
-        app.selection = .home
-        draft = "Prepare \(assessment?.name ?? "my exam") in \(course.name)."; send()
+        app.selectedCourseID = course.id; app.examAssessmentId = assessment?.id; app.showExamPreparation = true
     }
 
     func startPlanDay(planId: UUID, dayIndex: Int) {
