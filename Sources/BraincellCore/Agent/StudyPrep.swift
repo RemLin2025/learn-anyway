@@ -15,7 +15,7 @@ public enum PrepStage: String, Codable, Sendable, CaseIterable {
         }
     }
 }
-public enum PrepStatus: String, Codable, Sendable { case running, paused, partial, failed, cancelled, completed }
+public enum PrepStatus: String, Codable, Sendable { case running, paused, partial, failed, cancelled, completed, awaitingReview }
 
 public struct StudyPrepJob: Codable, Identifiable, Sendable, FetchableRecord, PersistableRecord {
     public static let databaseTableName = "study_prep_jobs"
@@ -45,6 +45,12 @@ public struct PrepState: Codable, Sendable, Equatable {
     public var retries: [String: Int] = [:]     // per stage
     public var modelCalls = 0
     public var log: [String] = []               // one line per finished stage, for the progress card
+    // Guided-workflow choices. All optional so jobs saved before the workflow existed still decode.
+    public var wizardStep: String?
+    public var excludedTopics: [String]?        // study-map topics the learner switched off
+    public var templateId: String?
+    public var params: GenerationParams?
+    public var setId: UUID?                     // the practice set this job planned (replaced when the plan changes)
 }
 
 public enum StudyPrep {
@@ -92,7 +98,7 @@ public enum StudyPrep {
 
     /// Starts a job, or resumes the unfinished one for this course/assessment. Re-running a completed job with unchanged sources
     /// returns the saved result without calling the model.
-    public static func run(course: Course, assessmentName: String?, regenerate: Bool = false, conversationId: UUID, _ c: AgentContext, stage report: @escaping @Sendable (String) -> Void) async throws -> ToolOutput {
+    public static func run(course: Course, assessmentName: String?, regenerate: Bool = false, analysisOnly: Bool = false, conversationId: UUID, _ c: AgentContext, stage report: @escaping @Sendable (String) -> Void) async throws -> ToolOutput {
         // Assessment: reuse by name, create once from the learner's request. Never invents a date or scope.
         var asm: Assessment?
         if let n = assessmentName?.trimmingCharacters(in: .whitespacesAndNewlines), !n.isEmpty {
@@ -126,7 +132,7 @@ public enum StudyPrep {
         let fp = fingerprint(readable)
         let stale = !s.fingerprint.isEmpty && s.fingerprint != fp
         if stale { s.mapId = nil; s.taskId = nil; s.doneBatches = []; s.accepted = 0; s.duplicates = 0; s.rejected = 0; s.log = ["Sources changed since last time; re-analyzing"] }
-        if existing?.status == .completed, !stale, !regenerate { return summary(job, s, course, asm, cached: true) }
+        if existing?.status == .completed, !stale, !regenerate, !analysisOnly { return summary(job, s, course, asm, cached: true) }
         s.fingerprint = fp; s.sourceCount = readable.count; s.gaps = gaps
         if !s.log.contains("Found \(readable.count) readable source(s)") { s.log.append("Found \(readable.count) readable source(s)") }
         try save(&job, s, c, stage: .extraction)
@@ -149,6 +155,10 @@ public enum StudyPrep {
                 try save(&job, s, c, stage: .weightAnalysis)
             }
             s.log.append("Analyzed study priorities")
+            if analysisOnly {           // the guided workflow stops here so the learner can review and edit the study map before anything is generated
+                if job.status != .completed { try save(&job, s, c, stage: .weightAnalysis, status: .awaitingReview) } else { try save(&job, s, c) }
+                return summary(job, s, course, asm, cached: false)
+            }
 
             // 6–8. Questions in bounded batches. A finished batch is never regenerated on resume.
             report("Generating practice questions")
