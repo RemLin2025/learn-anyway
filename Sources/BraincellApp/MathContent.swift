@@ -144,11 +144,13 @@ enum InlineMath {
 
     static func styled(_ n: MathNode, size: CGFloat, weight: Font.Weight, script: Bool = false) -> AttributedString? {
         func run(_ s: String, italic: Bool) -> AttributedString {
-            var a = AttributedString(s); a.font = italic ? .system(size: size, weight: weight, design: .serif).italic() : .system(size: size, weight: weight, design: .serif); return a
+            var a = AttributedString(s); a.font = italic ? .system(size: size, weight: weight, design: .serif).italic() : .system(size: size, weight: weight, design: .serif)
+            a.kern = size * (italic ? 0.2 : 0.06)      // italic glyphs overhang their advance; without this X,Y and P(X) collide
+            return a
         }
         switch n {
         case .symbol(let s):
-            let isVar = s.count == 1 && s.first!.isLetter
+            let isVar = s.count == 1 && s.first!.isLetter && s.first!.isASCII || s.count == 1 && (s.first!.unicodeScalars.first.map { (0x3B1...0x3C9).contains($0.value) } ?? false)
             var a = run(s, italic: isVar)
             if "=+−≤≥≠≈∈∉⊂⊆∪∩→⇒⇔·×±∼".contains(s) && s.count == 1 { a = run(" " + s + " ", italic: false) }
             return a

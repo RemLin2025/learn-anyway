@@ -21,7 +21,7 @@ struct RenderBlocksView: View {
         case .code(let t): Text(t).font(.system(size: size * 0.9, design: .monospaced)).padding(8).frame(maxWidth: .infinity, alignment: .leading).background(Theme.elevated, in: RoundedRectangle(cornerRadius: 6))
         case .table(let h, let rows):
             Grid(alignment: .leading, horizontalSpacing: 18, verticalSpacing: 4) {
-                if !h.isEmpty { GridRow { ForEach(Array(h.enumerated()), id: \.offset) { _, c in Text(c).font(.system(size: size, weight: .semibold)) } }; Divider() }
+                if !h.isEmpty { GridRow { ForEach(Array(h.enumerated()), id: \.offset) { _, c in InlineContent(inlines: MathMarkdown.inline(c), size: size, weight: .semibold) } }; Divider() }
                 ForEach(Array(rows.enumerated()), id: \.offset) { _, r in GridRow { ForEach(Array(r.enumerated()), id: \.offset) { _, c in InlineContent(inlines: MathMarkdown.inline(c), size: size) } } }
             }.padding(8).overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(Theme.border))
         case .image(let alt): Text("[Image: \(alt)]").italic().font(.system(size: size))
